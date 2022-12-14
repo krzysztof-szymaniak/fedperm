@@ -15,9 +15,8 @@ grid_shape = (2, 2)
 input_shape = (32, 32, 3) if DATASET == 'cifar' else (28, 28, 1)
 
 
-model_name = f"{'model_vault/' if vault else ''}{DATASET}-{'perm-' if permuted else ''}{'aug-' if augmented else ''}{grid_shape[0]}x{grid_shape[1]}-v{v}"
-# random_states = get_states(model_name, grid_shape)
-seed = 5555
+model_name = f"{'model_vault/' if vault else 'models/'}{DATASET}-{'perm-' if permuted else ''}{'aug-' if augmented else ''}{grid_shape[0]}x{grid_shape[1]}-v{v}"
+seed = 4242
 
 info_dir = "training_info"
 
@@ -53,3 +52,6 @@ elif DATASET == 'fashion':
 else:
     dataset = cifar10
     classes = [c for c in cifar_names.split("\n") if c]
+
+
+# tensorboard --logdir

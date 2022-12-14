@@ -121,9 +121,8 @@ def load_data(dataset, input_shape):
     return (x_train, y_train), (x_test, y_test), n_classes
 
 
-def save_training_info(model, history, model_path=None, show=False, seed=None):
+def save_training_info(model, history, info_path=None, show=False, seed=None):
     plt.clf()
-    pathlib.Path(join(model_path, info_dir)).mkdir(exist_ok=True)
     metrics = set([m.replace('val_', '') for m in history.history.keys()])
     for met in metrics:
         plt.plot(history.history[met])
@@ -136,13 +135,13 @@ def save_training_info(model, history, model_path=None, show=False, seed=None):
             plt.legend(['train', 'validate'], loc='right')
         else:
             plt.legend(['train'], loc='right')
-        plt.savefig(join(model_path, info_dir, met))
+        plt.savefig(join(info_path, met))
         if show:
             plt.show()
         plt.clf()
-    with open(join(model_path, info_dir, "model_config"), 'w') as f:
+    with open(join(info_path, "model_config"), 'w') as f:
         pprint(model.get_config(), f)
-    with open(join(model_path, info_dir, "seed"), 'w') as f:
+    with open(join(info_path,  "seed"), 'w') as f:
         print(seed, file=f)
 
 

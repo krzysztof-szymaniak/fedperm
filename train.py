@@ -2,7 +2,7 @@ import os
 import pathlib
 import shutil
 
-from keras.callbacks import EarlyStopping, ReduceLROnPlateau
+from keras.callbacks import EarlyStopping, ReduceLROnPlateau, TensorBoard
 from keras.preprocessing.image import ImageDataGenerator
 from sklearn.model_selection import train_test_split
 
@@ -13,7 +13,7 @@ from preprocessing import save_training_info, PermutationGenerator, load_data, i
 batch_size = 128
 epochs = 1000
 
-base_name = f"{DATASET}-{'perm-' if permuted else ''}{'aug-' if augmented else ''}{grid_shape[0]}x{grid_shape[1]}"
+base_name = f"models/{DATASET}-{'perm-' if permuted else ''}{'aug-' if augmented else ''}{grid_shape[0]}x{grid_shape[1]}"
 version = 1
 model_name = f"{base_name}-v{version}"
 while os.path.exists(model_name):
@@ -53,12 +53,13 @@ def train():
                             steps_per_epoch=len(x_train) // batch_size,
                             validation_steps=len(x_val) // batch_size,
                             callbacks=[
-                                EarlyStopping(monitor="val_loss", verbose=1, patience=16, restore_best_weights=True),
-                                ReduceLROnPlateau(monitor="val_loss", factor=0.2, patience=10, verbose=1, min_lr=1e-7),
-                                PlotProgress(),
+                                EarlyStopping(monitor="val_loss", verbose=1, patience=32, restore_best_weights=True),
+                                ReduceLROnPlateau(monitor="val_loss", factor=0.2, patience=5, verbose=1, min_lr=1e-7),
+                                PlotProgress(training_info_dir),
+                                TensorBoard(log_dir=f'./{model_name}/graph', histogram_freq=1, write_graph=True, write_images=True)
                             ])
         model.save(model_name)
-        save_training_info(model, history, model_path=model_name, show=False, seed=seed)
+        save_training_info(model, history, info_path=training_info_dir, show=False, seed=seed)
     except KeyboardInterrupt:
         shutil.rmtree(model_name)
 

@@ -1,4 +1,5 @@
 import sys
+from contextlib import redirect_stdout
 from os.path import join
 
 from keras import Model
@@ -9,9 +10,12 @@ from keras.layers import Conv2D, MaxPooling2D, concatenate, GlobalAveragePooling
 from keras.layers import Dense, Input
 from keras.losses import categorical_crossentropy
 from keras.optimizers import Adam
+from keras.regularizers import l2
 from matplotlib import pyplot as plt
 
 from config import info_dir
+
+weight_decay = 1e-3
 
 
 def SqueezeExcite(_in, ratio=8):
@@ -20,8 +24,8 @@ def SqueezeExcite(_in, ratio=8):
     """
     filters = _in.shape[-1]
     x = GlobalAveragePooling2D()(_in)
-    x = Dense(filters // ratio, activation='relu', kernel_initializer='he_normal', use_bias=False)(x)
-    x = Dense(filters, activation='sigmoid', kernel_initializer='he_normal', use_bias=False)(x)
+    x = Dense(filters // ratio, activation='relu', kernel_initializer='he_normal', use_bias=False, kernel_regularizer=l2(weight_decay))(x)
+    x = Dense(filters, activation='sigmoid', kernel_initializer='he_normal', use_bias=False, kernel_regularizer=l2(weight_decay))(x)
     return multiply([_in, x])
 
 
@@ -57,22 +61,41 @@ def best_so_far(_in):
 
 def cifar_submodel(_in):
     x = _in
-    # x = Conv2D(32, (7, 7), padding='same', strides=(1, 1), activation='relu', kernel_initializer='he_normal')(x)
+    # x = Conv2D(64, (7, 7), padding='same', kernel_regularizer=l2(weight_decay), kernel_initializer='he_normal')(_in)
+    # x = BatchNormalization()(x)
+    # x = Activation("relu")(x)
     # x = SqueezeExcite(x)
-    # x = Inception(x, filters=[32, 32, 32])
-    # x = MaxPool2D()(x)
-    x = Conv2D(128, (5, 5), padding='same', strides=(2, 2), activation='relu', kernel_initializer='he_normal')(x)
+    x = Conv2D(64, (1, 1), padding='same', kernel_regularizer=l2(weight_decay), kernel_initializer='he_normal')(x)
+    x = BatchNormalization()(x)
+    x = Activation("relu")(x)
     x = SqueezeExcite(x)
-    x = Inception(x, filters=[32, 32, 32])
+    x = Dropout(0.25)(x)
+    x = Conv2D(64, (3, 3), padding='same', kernel_regularizer=l2(weight_decay), kernel_initializer='he_normal')(x)
+    x = BatchNormalization()(x)
+    x = Activation("relu")(x)
     x = SqueezeExcite(x)
-    x = MaxPool2D()(x)
-    x = Conv2D(64, (1, 1), padding='same', strides=(1, 1), activation='relu', kernel_initializer='he_normal')(x)
-    # x = Inception(x, filters=[32, 32, 32])
-    # x = SqueezeExcite(x)
-    # x = Inception(x, filters=[32, 32, 32])
-    # x = SqueezeExcite(x)
-    # x = Conv2D(32, (1, 1), strides=(1, 1), activation='relu', kernel_initializer='he_normal')(x)
-    # x = Flatten()(x) if not global_pooling else GlobalAveragePooling2D()(x)
+    x = Dropout(0.25)(x)
+    x = Conv2D(64, (5, 5), padding='same', kernel_regularizer=l2(weight_decay), kernel_initializer='he_normal')(x)
+    x = BatchNormalization()(x)
+    x = Activation("relu")(x)
+    x = Dropout(0.25)(x)
+    x = MaxPool2D((2, 2))(x)
+
+    x = Dropout(0.25)(x)
+    x = Conv2D(128, (1, 1), kernel_regularizer=l2(weight_decay), kernel_initializer='he_normal')(x)
+    x = BatchNormalization()(x)
+    x = Activation("relu")(x)
+    x = SqueezeExcite(x)
+    x = Dropout(0.25)(x)
+    x = Conv2D(128, (3, 3), kernel_regularizer=l2(weight_decay), kernel_initializer='he_normal')(x)
+    x = BatchNormalization()(x)
+    x = Activation("relu")(x)
+    x = SqueezeExcite(x)
+    x = Dropout(0.25)(x)
+    x = Conv2D(128, (5, 5), kernel_regularizer=l2(weight_decay), kernel_initializer='he_normal')(x)
+    x = BatchNormalization()(x)
+    x = Activation("relu")(x)
+    x = GlobalAveragePooling2D()(x)
     return x
 
 
@@ -92,20 +115,29 @@ def get_composite_model(input_shape, n_classes, n_frames, i_dir):
         submodel = SubModel(_in, name=f"federated-{i}")
         if i == 0:
             utils.plot_model(submodel, show_layer_names=False, show_shapes=True, to_file=f'{i_dir}/submodel.png')
+            with open(f'{i_dir}/sub_summary.txt', 'w') as f:
+                with redirect_stdout(f):
+                    submodel.summary()
         model_outputs.append(submodel(_in))
 
-    # aggregated = Add()(model_outputs)  # TODO Add vs concatenate
+    # aggregated = Add()(model_outputs)  #  Add vs concatenate
     aggregated = concatenate(model_outputs, axis=-1)
-    aggregated = Conv2D(128, (2, 2), padding='same', strides=(2, 2), activation='relu', kernel_initializer='he_normal')(aggregated)
-    aggregated = GlobalAveragePooling2D()(aggregated)
-    _out = Dense(n_classes, activation='softmax', kernel_initializer='he_normal')(aggregated)
+    aggregated = Dropout(0.5)(aggregated)
+    aggregated = Dense(256, activation='relu', kernel_initializer='he_normal', kernel_regularizer=l2(weight_decay))(
+        aggregated)
+    aggregated = Dropout(0.5)(aggregated)
+    _out = Dense(n_classes, activation='softmax', kernel_initializer='he_normal', kernel_regularizer=l2(weight_decay))(
+        aggregated)
     ensemble_model = Model(inputs=_ins, outputs=_out, name="aggregated_model")
     ensemble_model.compile(loss=categorical_crossentropy,
                            # optimizer=SGD(learning_rate=1e-4, momentum=0.9),
-                           optimizer=Adam(learning_rate=1e-2, decay=0.01),
+                           optimizer=Adam(learning_rate=1e-3, decay=0.001),
                            metrics=['accuracy'])
     ensemble_model.summary()
     utils.plot_model(ensemble_model, show_layer_names=False, show_shapes=True, to_file=f'{i_dir}/model.png')
+    with open(f'{i_dir}/summary.txt', 'w') as f:
+        with redirect_stdout(f):
+            ensemble_model.summary()
     return ensemble_model
 
 
@@ -174,16 +206,26 @@ class PlotProgress(Callback):
     min_loss = sys.maxsize
     min_val_loss = sys.maxsize
 
+    def __init__(self, i_dir):
+        super().__init__()
+        self.axs = None
+        self.f = None
+        self.metrics = None
+        self.i_dir = i_dir
+        self.first_epoch = True
+
     def on_train_begin(self, logs=None):
         plt.ion()
-        self.first_epoch = True
         if logs is None:
             logs = {}
         self.metrics = {}
-        self.f, self.axs = plt.subplots(1, 3, figsize=(15, 5))
-
         for metric in logs:
             self.metrics[metric] = []
+
+        self.f, self.axs = plt.subplots(1, 3, figsize=(15, 5))
+
+    def on_train_end(self, logs=None):
+        self.f.savefig(f"{self.i_dir}/metrics")
 
     def on_epoch_end(self, epoch, logs=None):
         # Storing metrics
