@@ -4,19 +4,20 @@ permuted = True
 augmented = True
 show = True
 
-# DATASET = "mnist"
+DATASET = "mnist"
 # DATASET = "fashion"
-DATASET = "cifar"
+# DATASET = "cifar"
 v = 1
 vault = False
 single_batch_mode = False
+
 grid_shape = (2, 2)
 
 input_shape = (32, 32, 3) if DATASET == 'cifar' else (28, 28, 1)
 
 
 model_name = f"{'model_vault/' if vault else 'models/'}{DATASET}-{'perm-' if permuted else ''}{'aug-' if augmented else ''}{grid_shape[0]}x{grid_shape[1]}-v{v}"
-seed = 4242
+seed = 123435
 
 info_dir = "training_info"
 

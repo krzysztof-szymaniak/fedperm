@@ -95,11 +95,19 @@ def bar(i, n, label=None):
     sys.stdout.flush()
 
 
-def init_states(seed, grid_shape, overlap=True):
+def init_states(seed, grid_shape, overlap=True, reduce_overlap=True):
     np.random.seed(seed)
-    if overlap:
-        r_range = np.arange(0, grid_shape[0] - 0.5, 0.5)
-        c_range = np.arange(0, grid_shape[1] - 0.5, 0.5)
+    if overlap or reduce_overlap:
+        if reduce_overlap:
+            r_range = range(grid_shape[0])
+            c_range = range(grid_shape[1])
+            random_states = {(r, c): np.random.randint(1, 10000) for r in r_range for c in c_range}
+            random_states[(0.5, 0.5)] = np.random.randint(1, 10000)
+            np.random.seed(int(time.time()))
+            return random_states
+        else:
+            r_range = np.arange(0, grid_shape[0] - 0.5, 0.5)
+            c_range = np.arange(0, grid_shape[1] - 0.5, 0.5)
     else:
         r_range = range(grid_shape[0])
         c_range = range(grid_shape[1])
@@ -141,9 +149,12 @@ def save_training_info(model, history, info_path=None, show=False, seed=None):
         plt.clf()
     with open(join(info_path, "model_config"), 'w') as f:
         pprint(model.get_config(), f)
-    with open(join(info_path,  "seed"), 'w') as f:
-        print(seed, file=f)
 
+
+def get_seed(model_name):
+    with open(join(model_name, info_dir, "seed"), 'r') as f:
+        seed = int(f.readline())
+        return seed
 
 
 

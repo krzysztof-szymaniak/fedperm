@@ -8,8 +8,7 @@ from pretty_confusion_matrix import pp_matrix_from_data
 from sklearn.metrics import classification_report
 
 from config import dataset, input_shape, grid_shape, show, model_name, info_dir, classes
-from model import get_seed
-from preprocessing import load_data, PermutationGenerator
+from preprocessing import load_data, PermutationGenerator, get_seed
 
 
 def test():
