@@ -1,4 +1,4 @@
-from keras.datasets import mnist, fashion_mnist, cifar10
+from tensorflow.keras.datasets import mnist, fashion_mnist, cifar10
 
 permuted = True
 augmented = True
@@ -14,9 +14,9 @@ single_batch_mode = False
 grid_shape = (2, 2)
 
 input_shape = (32, 32, 3) if DATASET == 'cifar' else (28, 28, 1)
+subinput_shape = (input_shape[0] // grid_shape[0], input_shape[1] // grid_shape[1], input_shape[2])
 
-
-model_name = f"{'model_vault/' if vault else 'models/'}{DATASET}-{'perm-' if permuted else ''}{'aug-' if augmented else ''}{grid_shape[0]}x{grid_shape[1]}-v{v}"
+model_name = f"{'model_vault/' if vault else 'models/'}{DATASET}-{grid_shape[0]}x{grid_shape[1]}-v{v}"
 seed = 123435
 
 info_dir = "training_info"
@@ -53,6 +53,5 @@ elif DATASET == 'fashion':
 else:
     dataset = cifar10
     classes = [c for c in cifar_names.split("\n") if c]
-
 
 # tensorboard --logdir

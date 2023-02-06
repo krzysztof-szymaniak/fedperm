@@ -1,34 +1,20 @@
+import os.path
 import sys
 from contextlib import redirect_stdout
 
-from keras import Model
-from keras import utils
-from keras.callbacks import Callback
-from keras.layers import Conv2D, concatenate, GlobalAveragePooling2D, BatchNormalization, Activation, MaxPool2D, \
-    Flatten, Dropout
-from keras.layers import Dense, Input
-from keras.losses import categorical_crossentropy
-from keras.optimizers import Adam
-from keras.regularizers import l2
 from matplotlib import pyplot as plt
+from tensorflow.keras import Model
+from tensorflow.keras import utils
+from tensorflow.keras.callbacks import Callback
+from tensorflow.keras.layers import Conv2D, concatenate, GlobalAveragePooling2D, BatchNormalization, Activation, \
+    MaxPool2D, Dropout, Flatten
+from tensorflow.keras.layers import Dense, Input
+from tensorflow.keras.models import load_model
+from tensorflow.keras.regularizers import l2
 
 from layers import SqueezeExcite, Inception, ReduceChannels
 
 weight_decay = 1e-5
-
-
-def best_so_far(_in):
-    x = _in
-    x = Conv2D(64, (7, 7), padding='same', strides=(2, 2), activation='relu', kernel_initializer='he_normal')(x)
-    x = SqueezeExcite(x)
-    x = MaxPool2D((3, 3), padding='same', strides=(2, 2), )(x)
-    x = Conv2D(64, (1, 1), padding='same', strides=(1, 1), activation='relu', kernel_initializer='he_normal')(x)
-    x = SqueezeExcite(x)
-    x = Conv2D(192, (3, 3), padding='same', strides=(1, 1), activation='relu', kernel_initializer='he_normal')(x)
-    x = SqueezeExcite(x)
-    x = Inception(x, filters=[10, 10, 10])
-    x = Flatten()(x)
-    return x
 
 
 def cifar_submodel(_in):
@@ -76,17 +62,17 @@ def cifar_submodel(_in):
     return x
 
 
-def inception_cifar(_in):
+def inception_model(_in, n_outputs):
     d_r = 0.15
     x = _in
     x = Inception(x, filters=[64, 64, 64])
     x = BatchNormalization()(x)
-    x = MaxPool2D()(x)  # 8
+    x = MaxPool2D()(x)
 
     x = Dropout(d_r)(x)
     x = Inception(x, filters=[128, 128, 128])
     x = BatchNormalization()(x)
-    x = MaxPool2D()(x)  # 4
+    x = MaxPool2D()(x)
 
     x = Dropout(d_r)(x)
     x = Inception(x, filters=[256, 256, 256])
@@ -103,19 +89,52 @@ def inception_cifar(_in):
     x = ReduceChannels(x, channels=256)
     x = BatchNormalization()(x)
     x = SqueezeExcite(x)
-    x = ReduceChannels(x, channels=128)
+    x = ReduceChannels(x, channels=n_outputs)
     x = BatchNormalization()(x)
     x = GlobalAveragePooling2D()(x)
     return x
 
 
-def SubModel(_in, name=None):
+def SubModel(_in, name=None, n_outputs=None):
     x = _in
-    # x = cifar_submodel(x)
-    x = inception_cifar(x)
+    x = inception_model(x, n_outputs)
     _out = x
     model = Model(inputs=_in, outputs=_out, name=name)
     model.summary()
+    return model
+
+
+def get_aggregate_model(models_path, input_shape, n_classes, i_dir):
+    models = [load_model(m_p) for m_p in [os.path.join(models_path, m) for m in os.listdir(models_path)]]
+    _ins = [Input(shape=input_shape) for _ in models]
+    for m in models:
+        m.trainable = False
+    x = concatenate([m(_in) for m, _in in zip(models, _ins)])
+    x = Dense(256, activation='relu', kernel_initializer='he_normal', kernel_regularizer=l2(weight_decay))(x)
+    x = Dropout(0.3)(x)
+    x = Dense(128, activation='relu', kernel_initializer='he_normal', kernel_regularizer=l2(weight_decay))(x)
+    x = Dropout(0.3)(x)
+    x = Dense(n_classes, activation='softmax', kernel_initializer='he_normal', kernel_regularizer=l2(weight_decay))(x)
+    _out = x
+    model = Model(inputs=_ins, outputs=_out, name="aggregated-sequential")
+    model.summary()
+    utils.plot_model(model, show_layer_names=False, show_shapes=True, to_file=f'{i_dir}/submodel.png')
+    with open(f'{i_dir}/sub_summary.txt', 'w') as f:
+        with redirect_stdout(f):
+            model.summary()
+    return model
+
+
+def get_single_model(input_shape, n_classes, i, i_dir):
+    _in = Input(shape=input_shape)
+    x = inception_model(_in, 128)
+    x = Dense(n_classes, activation='softmax', kernel_initializer='he_normal', kernel_regularizer=l2(weight_decay))(x)
+    _out = x
+    model = Model(inputs=_in, outputs=_out, name=f"single-{i + 1}")
+    utils.plot_model(model, show_layer_names=False, show_shapes=True, to_file=f'{i_dir}/submodel.png')
+    with open(f'{i_dir}/sub_summary.txt', 'w') as f:
+        with redirect_stdout(f):
+            model.summary()
     return model
 
 
@@ -123,15 +142,13 @@ def get_composite_model(input_shape, n_classes, n_frames, i_dir):
     _ins = [Input(shape=input_shape) for _ in range(n_frames)]
     model_outputs = []
     for i, _in in enumerate(_ins):
-        submodel = SubModel(_in, name=f"federated-{i}")
+        submodel = SubModel(_in, name=f"federated-{i}", n_outputs=128)
         if i == 0:
             utils.plot_model(submodel, show_layer_names=False, show_shapes=True, to_file=f'{i_dir}/submodel.png')
             with open(f'{i_dir}/sub_summary.txt', 'w') as f:
                 with redirect_stdout(f):
                     submodel.summary()
         model_outputs.append(submodel(_in))
-
-    # aggr = Add()(model_outputs)  #  Add vs concatenate
     aggr = concatenate(model_outputs, axis=-1)
     aggr = Dropout(0.3)(aggr)
     aggr = Dense(256, activation='relu', kernel_initializer='he_normal', kernel_regularizer=l2(weight_decay))(aggr)
@@ -139,10 +156,6 @@ def get_composite_model(input_shape, n_classes, n_frames, i_dir):
     _out = Dense(n_classes, activation='softmax', kernel_initializer='he_normal', kernel_regularizer=l2(weight_decay))(
         aggr)
     ensemble_model = Model(inputs=_ins, outputs=_out, name="aggregated_model")
-    ensemble_model.compile(loss=categorical_crossentropy,
-                           # optimizer=SGD(learning_rate=1e-4, momentum=0.9),
-                           optimizer=Adam(learning_rate=1e-3, decay=0.001),
-                           metrics=['accuracy'])
     ensemble_model.summary()
     utils.plot_model(ensemble_model, show_layer_names=False, show_shapes=True, to_file=f'{i_dir}/model.png')
     with open(f'{i_dir}/summary.txt', 'w') as f:

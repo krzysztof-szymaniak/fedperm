@@ -1,21 +1,13 @@
-import pathlib
-import sys
-import time
 from os.path import join
 from pprint import pprint
 
-import keras
 import numpy as np
-from keras.preprocessing.image import ImageDataGenerator
-from keras.utils import to_categorical
+import tensorflow as tf
 from matplotlib import pyplot as plt
-from sklearn.utils import shuffle
+from tensorflow.keras.preprocessing.image import ImageDataGenerator
+from tensorflow.keras.utils import to_categorical
 
 info_dir = "training_info"
-
-
-def generate_permutation(shape, random_state):
-    return shuffle(np.arange(shape[0] * shape[1]), random_state=random_state)
 
 
 def permute(arr, perm):
@@ -26,26 +18,22 @@ def permute(arr, perm):
     return res
 
 
-class PermutationGenerator(keras.utils.Sequence):
-    def __init__(self, X, Y, augmenter: ImageDataGenerator, input_shape, grid_shape,
-                 shuffle_dataset=True, debug=False, batch_size=128, seed=None):
+class PermutationGenerator(tf.keras.utils.Sequence):
+    def __init__(self, X, Y, augmenter: ImageDataGenerator, subinput_shape,
+                 shuffle_dataset=True, debug=False, batch_size=128, permutations=None):
         self.Y = Y
         self.X = X
         self.n = len(X)
         self.datagen = augmenter
         self.debug = debug
         self.shuffle = shuffle_dataset
-        self.random_states = init_states(seed, grid_shape)
-        self.grid_shape = grid_shape
-        self.input_shape = input_shape
         self.batch_size = batch_size
 
-        self.permuted = True if seed is not None else False
-        self.subinput_shape = (input_shape[0] // grid_shape[0], input_shape[1] // grid_shape[1], input_shape[2])
+        self.permuted = True if permutations is not None else False
+        self.subinput_shape = subinput_shape
         self.gen = self.datagen.flow(self.X, self.Y, batch_size=self.batch_size, shuffle=shuffle_dataset)
-        self.permutations = {(row, col): generate_permutation(self.subinput_shape, self.random_states[(row, col)]) for
-                             (row, col) in self.random_states}
-        self.n_frames = len(self.random_states)
+        self.permutations = permutations
+        self.n_frames = len(permutations)
 
     def next(self):
         x, y = self.gen.next()
@@ -72,8 +60,7 @@ class PermutationGenerator(keras.utils.Sequence):
         return self.n // self.batch_size
 
     def generate_frames(self, x_batch):
-        sr = self.subinput_shape[0]
-        sc = self.subinput_shape[1]
+        sr, sc, _ = self.subinput_shape
         x_frames = []
         for f, ((row, col), perm) in enumerate(self.permutations.items()):
             xb = np.zeros((x_batch.shape[0], *self.subinput_shape))
@@ -85,35 +72,6 @@ class PermutationGenerator(keras.utils.Sequence):
             x_frames.append(xb)
         return x_frames
 
-
-def bar(i, n, label=None):
-    bar_width = 50
-    progress = (i + 1) / n
-    sys.stdout.write('\r')
-    sys.stdout.write(
-        f"[{'=' * int(bar_width * progress):{bar_width}s}] {int(100 * progress)}% ( {i + 1}/{n} )  {label if label is not None else ''}")
-    sys.stdout.flush()
-
-
-def init_states(seed, grid_shape, overlap=True, reduce_overlap=True):
-    np.random.seed(seed)
-    if overlap or reduce_overlap:
-        if reduce_overlap:
-            r_range = range(grid_shape[0])
-            c_range = range(grid_shape[1])
-            random_states = {(r, c): np.random.randint(1, 10000) for r in r_range for c in c_range}
-            random_states[(0.5, 0.5)] = np.random.randint(1, 10000)
-            np.random.seed(int(time.time()))
-            return random_states
-        else:
-            r_range = np.arange(0, grid_shape[0] - 0.5, 0.5)
-            c_range = np.arange(0, grid_shape[1] - 0.5, 0.5)
-    else:
-        r_range = range(grid_shape[0])
-        c_range = range(grid_shape[1])
-    random_states = {(r, c): np.random.randint(1, 10000) for r in r_range for c in c_range}
-    np.random.seed(int(time.time()))
-    return random_states
 
 
 def load_data(dataset, input_shape):
@@ -129,7 +87,7 @@ def load_data(dataset, input_shape):
     return (x_train, y_train), (x_test, y_test), n_classes
 
 
-def save_training_info(model, history, info_path=None, show=False, seed=None):
+def save_training_info(model, history, info_path=None, show=False):
     plt.clf()
     metrics = set([m.replace('val_', '') for m in history.history.keys()])
     for met in metrics:
@@ -155,7 +113,6 @@ def get_seed(model_name):
     with open(join(model_name, info_dir, "seed"), 'r') as f:
         seed = int(f.readline())
         return seed
-
 
 
 if __name__ == '__main__':
