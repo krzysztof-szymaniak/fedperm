@@ -7,7 +7,7 @@ from matplotlib import pyplot as plt
 from tensorflow.keras.preprocessing.image import ImageDataGenerator
 from tensorflow.keras.utils import to_categorical
 
-info_dir = "training_info"
+from config import info_dir
 
 
 def permute(arr, perm):
@@ -16,6 +16,16 @@ def permute(arr, perm):
         channel = arr[:, :, c]
         res[:, :, c] = channel.ravel()[perm].reshape(channel.shape)
     return res
+
+
+def get_gen(augmented=True):
+    return ImageDataGenerator(
+        rescale=1 / 255,
+        rotation_range=15,  # randomly rotate images in the range (degrees, 0 to 180)
+        zoom_range=0.1,  # Randomly zoom image
+        width_shift_range=0.2,  # randomly shift images horizontally (fraction of total width)
+        height_shift_range=0.2,  # randomly shift images vertically (fraction of total height)
+    ) if augmented else ImageDataGenerator(rescale=1. / 255)
 
 
 class PermutationGenerator(tf.keras.utils.Sequence):
@@ -28,8 +38,6 @@ class PermutationGenerator(tf.keras.utils.Sequence):
         self.debug = debug
         self.shuffle = shuffle_dataset
         self.batch_size = batch_size
-
-        self.permuted = True if permutations is not None else False
         self.subinput_shape = subinput_shape
         self.gen = self.datagen.flow(self.X, self.Y, batch_size=self.batch_size, shuffle=shuffle_dataset)
         self.permutations = permutations
@@ -68,10 +76,9 @@ class PermutationGenerator(tf.keras.utils.Sequence):
                 r_s = slice(int(row * sr), int((row + 1) * sr))
                 c_s = slice(int(col * sc), int((col + 1) * sc))
                 sub_img = x[r_s, c_s, :]
-                xb[i, ...] = permute(sub_img, perm) if self.permuted else sub_img
+                xb[i, ...] = permute(sub_img, perm)
             x_frames.append(xb)
         return x_frames
-
 
 
 def load_data(dataset, input_shape):
@@ -97,6 +104,7 @@ def save_training_info(model, history, info_path=None, show=False):
         plt.title(f"{met}")
         plt.ylabel(met)
         plt.xlabel('epoch')
+        plt.grid()
         if f"val_{met}" in history.history:
             plt.legend(['train', 'validate'], loc='right')
         else:

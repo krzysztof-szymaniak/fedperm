@@ -6,93 +6,14 @@ from matplotlib import pyplot as plt
 from tensorflow.keras import Model
 from tensorflow.keras import utils
 from tensorflow.keras.callbacks import Callback
-from tensorflow.keras.layers import Conv2D, concatenate, GlobalAveragePooling2D, BatchNormalization, Activation, \
-    MaxPool2D, Dropout, Flatten
 from tensorflow.keras.layers import Dense, Input
+from tensorflow.keras.layers import concatenate, Dropout
 from tensorflow.keras.models import load_model
 from tensorflow.keras.regularizers import l2
 
-from layers import SqueezeExcite, Inception, ReduceChannels
+from layers import inception_model
 
 weight_decay = 1e-5
-
-
-def cifar_submodel(_in):
-    d_r = 0.25
-    x = _in
-    x = Conv2D(64, (1, 1), padding='same', kernel_regularizer=l2(weight_decay), kernel_initializer='he_normal')(x)
-    x = BatchNormalization()(x)
-    x = Activation("relu")(x)
-    x = Dropout(d_r)(x)
-
-    x = Conv2D(64, (3, 3), padding='same', kernel_regularizer=l2(weight_decay), kernel_initializer='he_normal')(x)
-    x = BatchNormalization()(x)
-    x = Activation("relu")(x)
-    x = Dropout(d_r)(x)
-
-    x = Conv2D(64, (5, 5), padding='same', kernel_regularizer=l2(weight_decay), kernel_initializer='he_normal')(x)
-    x = BatchNormalization()(x)
-    x = Activation("relu")(x)
-    x = Dropout(d_r)(x)
-
-    x = Conv2D(64, (7, 7), padding='same', kernel_regularizer=l2(weight_decay), kernel_initializer='he_normal')(x)
-    x = SqueezeExcite(x)
-    x = BatchNormalization()(x)
-    x = Activation("relu")(x)
-    x = MaxPool2D((2, 2))(x)
-
-    x = Dropout(d_r)(x)
-    x = Conv2D(128, (1, 1), padding='same', kernel_regularizer=l2(weight_decay), kernel_initializer='he_normal')(x)
-    x = BatchNormalization()(x)
-    x = Activation("relu")(x)
-    x = Dropout(d_r)(x)
-
-    x = Conv2D(128, (3, 3), kernel_regularizer=l2(weight_decay), kernel_initializer='he_normal')(x)
-    x = SqueezeExcite(x)
-    x = BatchNormalization()(x)
-    x = Activation("relu")(x)
-    x = Dropout(d_r)(x)
-
-    x = Conv2D(128, (5, 5), kernel_regularizer=l2(weight_decay), kernel_initializer='he_normal')(x)
-    x = SqueezeExcite(x)
-    x = BatchNormalization()(x)
-    x = Activation("relu")(x)
-    x = GlobalAveragePooling2D()(x)
-    x = Dropout(d_r)(x)
-    return x
-
-
-def inception_model(_in, n_outputs):
-    d_r = 0.15
-    x = _in
-    x = Inception(x, filters=[64, 64, 64])
-    x = BatchNormalization()(x)
-    x = MaxPool2D()(x)
-
-    x = Dropout(d_r)(x)
-    x = Inception(x, filters=[128, 128, 128])
-    x = BatchNormalization()(x)
-    x = MaxPool2D()(x)
-
-    x = Dropout(d_r)(x)
-    x = Inception(x, filters=[256, 256, 256])
-    x = BatchNormalization()(x)
-    x = MaxPool2D()(x)
-
-    x = Dropout(d_r)(x)
-    x = Inception(x, filters=[512, 512, 512])
-    x = BatchNormalization()(x)
-    x = SqueezeExcite(x)
-    x = ReduceChannels(x, channels=512)
-    x = BatchNormalization()(x)
-    x = SqueezeExcite(x)
-    x = ReduceChannels(x, channels=256)
-    x = BatchNormalization()(x)
-    x = SqueezeExcite(x)
-    x = ReduceChannels(x, channels=n_outputs)
-    x = BatchNormalization()(x)
-    x = GlobalAveragePooling2D()(x)
-    return x
 
 
 def SubModel(_in, name=None, n_outputs=None):
@@ -175,13 +96,14 @@ class PlotProgress(Callback):
     loss_ep = 0
     val_loss_ep = 0
 
-    def __init__(self, i_dir):
+    def __init__(self, i_dir, plot_lr=True):
         super().__init__()
         self.axs = None
         self.f = None
         self.metrics = None
         self.i_dir = i_dir
         self.first_epoch = True
+        self.plot_lr = plot_lr
 
     def on_train_begin(self, logs=None):
         plt.ion()
@@ -190,10 +112,12 @@ class PlotProgress(Callback):
         self.metrics = {}
         for metric in logs:
             self.metrics[metric] = []
-        self.f, self.axs = plt.subplots(1, 3, figsize=(13, 4))
+        self.f, self.axs = plt.subplots(1, 3, figsize=(13, 4)) if self.plot_lr else plt.subplots(1, 2, figsize=(9, 4))
 
     def on_train_end(self, logs=None):
         self.f.savefig(f"{self.i_dir}/metrics")
+        plt.ioff()
+        plt.close(self.f)
 
     def on_epoch_end(self, epoch, logs=None):
         # Storing metrics
@@ -204,7 +128,6 @@ class PlotProgress(Callback):
                 self.metrics[metric].append(logs.get(metric))
             else:
                 self.metrics[metric] = [logs.get(metric)]
-
         acc = max(self.max_acc, round(logs.get("accuracy"), 4))
         val_acc = max(self.max_val_acc, round(logs.get("val_accuracy"), 4))
         loss = min(self.min_loss, round(logs.get("loss"), 4))
@@ -242,10 +165,10 @@ class PlotProgress(Callback):
                                  color='orange', )
                 if metric == 'accuracy':
                     self.axs[i].set_title(
-                        f"{'Max accuracy': <16}: {self.max_acc:.4f}, not improved in {self.acc_ep} epochs\n{'Max val_accuracy': <16}: {self.max_val_acc:.4f}, not improved in {self.val_acc_ep} epochs")
+                        f"{'Max accuracy': <16}: {self.max_acc:.4f}, not impr. in {self.acc_ep} epochs\n{'Max val_accuracy': <16}: {self.max_val_acc:.4f}, not impr. in {self.val_acc_ep} epochs")
                 elif metric == 'loss':
                     self.axs[i].set_title(
-                        f"{'Min loss': <16}: {self.min_loss:.4f}, not improved in {self.loss_ep} epochs\n{'Min val_loss': <16}: {self.min_val_loss:.4f}, not improved in {self.val_loss_ep} epochs")
+                        f"{'Min loss': <16}: {self.min_loss:.4f}, not impr. in {self.loss_ep} epochs\n{'Min val_loss': <16}: {self.min_val_loss:.4f}, not impr. in {self.val_loss_ep} epochs")
             if self.first_epoch:
                 self.axs[i].legend()
                 self.axs[i].grid()
