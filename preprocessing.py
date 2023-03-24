@@ -1,13 +1,14 @@
+import os
+import pathlib
 from os.path import join
-from pprint import pprint
 
+import imageio
 import numpy as np
 import tensorflow as tf
-from matplotlib import pyplot as plt
+from PIL import Image
+from matplotlib import pyplot as plt, patches
 from tensorflow.keras.preprocessing.image import ImageDataGenerator
 from tensorflow.keras.utils import to_categorical
-
-from config import info_dir
 
 
 def permute(arr, perm):
@@ -30,36 +31,72 @@ def get_gen(augmented=True):
 
 class PermutationGenerator(tf.keras.utils.Sequence):
     def __init__(self, X, Y, augmenter: ImageDataGenerator, subinput_shape,
-                 shuffle_dataset=True, debug=False, batch_size=128, permutations=None):
-        self.Y = Y
-        self.X = X
+                 shuffle_dataset=True, batch_size=128, permutations=None, debug_path=None):
+        self.Y = Y.copy()
+        self.X = X.copy()
         self.n = len(X)
         self.datagen = augmenter
-        self.debug = debug
         self.shuffle = shuffle_dataset
         self.batch_size = batch_size
         self.subinput_shape = subinput_shape
         self.gen = self.datagen.flow(self.X, self.Y, batch_size=self.batch_size, shuffle=shuffle_dataset)
         self.permutations = permutations
         self.n_frames = len(permutations)
+        self.debug_path = debug_path
+
+    def run_debug(self, index):
+        if self.debug_path is None:
+            return
+        x = self.X[index]
+        y = self.Y[index]
+        sr, sc, channels = self.subinput_shape
+
+        subimages = self.generate_frames(np.array([x]))
+        pathlib.Path("tmp").mkdir(exist_ok=True)
+        pathes = []
+        imgs = []
+        for i, (row, col) in enumerate(self.permutations):
+            if int(row) == row and int(col) == col:
+                color = 'g'
+                width = 3
+            elif int(row) == row or int(col) == col:
+                color = 'b'
+                width = 2
+            else:
+                color = 'r'
+                width = 1
+            rect = patches.Rectangle((int(row * sr), int(col * sc)), sr, sc, linewidth=width, edgecolor=color,
+                                     facecolor='none')
+            pathes.append(rect)
+
+        fig, ax = plt.subplots(1, 2, )
+        if channels == 1:
+            x = np.array(Image.fromarray(x[..., 0], mode='L').convert('RGB'))
+        ax[0].imshow(x)
+        for i, (patch, subimg) in enumerate(zip(pathes, subimages)):
+            subimg = subimg[0, ...]
+            if channels == 1:
+                subimg = np.array(Image.fromarray(subimg[..., 0], mode='L').convert('RGB'))
+            im_path = f'tmp/{i}.png'
+            ax[0].add_patch(patch)
+            ax[1].clear()
+            ax[1].imshow(subimg)
+            fig.savefig(im_path)
+            imgs.append(plt.imread(im_path))
+            if i == len(pathes) - 1:
+                extent = ax[0].get_window_extent().transformed(fig.dpi_scale_trans.inverted())
+                fig.savefig(join(self.debug_path, f'grid_{index}.png'), bbox_inches=extent.expanded(1.1, 1.2))
+        gif_path = join(self.debug_path, f'frames_{index}.gif')
+        imageio.mimsave(gif_path, imgs, fps=55, duration=0.5)
+        os.startfile(gif_path)
 
     def next(self):
         x, y = self.gen.next()
         xp = self.generate_frames(x)
-        if self.debug:
-            rows = 5
-            fig, ax = plt.subplots(rows, self.n_frames + 1, figsize=(10, 10))
-            for j in range(rows):
-                ax[j, 0].imshow(x[j])
-                ax[j, 0].set_title(f"{np.argmax(y[j])}")
-                for i in range(self.n_frames):
-                    ax[j, i + 1].imshow(xp[i][j])
-            plt.tight_layout()
-            plt.show()
         return xp, y
 
     def on_epoch_end(self):
-        ...
+        pass
 
     def __getitem__(self, index):
         return self.next()
@@ -70,7 +107,7 @@ class PermutationGenerator(tf.keras.utils.Sequence):
     def generate_frames(self, x_batch):
         sr, sc, _ = self.subinput_shape
         x_frames = []
-        for f, ((row, col), perm) in enumerate(self.permutations.items()):
+        for (row, col), perm in self.permutations.items():
             xb = np.zeros((x_batch.shape[0], *self.subinput_shape))
             for i, x in enumerate(x_batch):
                 r_s = slice(int(row * sr), int((row + 1) * sr))
@@ -81,7 +118,7 @@ class PermutationGenerator(tf.keras.utils.Sequence):
         return x_frames
 
 
-def load_data(dataset, input_shape):
+def load_data(dataset):
     (x_train, y_train), (x_test, y_test) = dataset.load_data()
     y_train = y_train.ravel()
     y_test = y_test.ravel()
@@ -89,38 +126,10 @@ def load_data(dataset, input_shape):
     n_classes = len(classes)
     y_train = to_categorical(y_train, n_classes)
     y_test = to_categorical(y_test, n_classes)
-    x_train = x_train.reshape(x_train.shape[0], *input_shape)
-    x_test = x_test.reshape(x_test.shape[0], *input_shape)
+    if len(x_train.shape) == 3:
+        x_train = np.expand_dims(x_train, axis=-1)
+        x_test = np.expand_dims(x_test, axis=-1)
     return (x_train, y_train), (x_test, y_test), n_classes
-
-
-def save_training_info(model, history, info_path=None, show=False):
-    plt.clf()
-    metrics = set([m.replace('val_', '') for m in history.history.keys()])
-    for met in metrics:
-        plt.plot(history.history[met])
-        if f"val_{met}" in history.history:
-            plt.plot(history.history[f"val_{met}"])
-        plt.title(f"{met}")
-        plt.ylabel(met)
-        plt.xlabel('epoch')
-        plt.grid()
-        if f"val_{met}" in history.history:
-            plt.legend(['train', 'validate'], loc='right')
-        else:
-            plt.legend(['train'], loc='right')
-        plt.savefig(join(info_path, met))
-        if show:
-            plt.show()
-        plt.clf()
-    with open(join(info_path, "model_config"), 'w') as f:
-        pprint(model.get_config(), f)
-
-
-def get_seed(model_name):
-    with open(join(model_name, info_dir, "seed"), 'r') as f:
-        seed = int(f.readline())
-        return seed
 
 
 if __name__ == '__main__':

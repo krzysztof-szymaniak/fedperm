@@ -1,47 +1,64 @@
 import numpy as np
 from sklearn.utils import shuffle
 
-MAX_SEED = 10000000
+MAX_STATE = 10000000
+
+
+def is_multiple(x, of, eps=1e-6):
+    # returns true if a is a multiple of float b up to precision eps
+    div = x / of
+    return abs(div - round(div)) < eps
+
+
+def cross(r, c, size=None, ctr=None):
+    return (r == ctr[0] - 0.5 and abs(c - ctr[1] - 0.5 <= size)) or (
+            c == ctr[1] - 0.5 and abs(r - ctr[0] - 0.5 <= size))
+
+
+def center(r, c, radius=None, ctr=None):
+    return np.sqrt((r - ctr[0]+0.5) ** 2 + (c - ctr[1] + 0.5) ** 2) <= radius
 
 
 def init_states(seed, grid_shape, shape):
-    np.random.seed(seed)
-    assert grid_shape == (2, 2)
-    if shape == 'overlap_center_2x2':
-        r_range = range(grid_shape[0])
-        c_range = range(grid_shape[1])
-        random_states = {(r, c): np.random.randint(1, MAX_SEED) for r in r_range for c in c_range}
-        random_states[(0.5, 0.5)] = np.random.randint(1, MAX_SEED)
+    if seed is not None:
+        np.random.seed(seed)
+    # base grid
+    random_states = {(r, c): np.random.randint(1, MAX_STATE) for r in range(grid_shape[0]) for c in
+                     range(grid_shape[1])}
 
-    elif shape == 'overlap_cross_2x2':
-        r_range = np.arange(0, grid_shape[0] - 0.5, 0.5)
-        c_range = np.arange(0, grid_shape[1] - 0.5, 0.5)
-        random_states = {(r, c): np.random.randint(1, MAX_SEED) for r in r_range for c in c_range}
-        random_states[(0.5, 0.5)] = np.random.randint(1, MAX_SEED)  # center
-        random_states[(0, 0.5)] = np.random.randint(1, MAX_SEED)  # top
-        random_states[(1, 0.5)] = np.random.randint(1, MAX_SEED)  # bot
-        random_states[(0.5, 0)] = np.random.randint(1, MAX_SEED)  # left
-        random_states[(0.5, 1)] = np.random.randint(1, MAX_SEED)  # right
+    def add_overlap(condition, **kwargs):
+        for r in np.arange(0, grid_shape[0] - 0.5, 0.5):
+            for c in np.arange(0, grid_shape[1] - 0.5, 0.5):
+                if (r, c) not in random_states and condition(r, c, **kwargs):
+                    random_states[(r, c)] = np.random.randint(1, MAX_STATE)
 
-    elif shape == 'overlap_full_2x2':
-        r_range = np.arange(0, grid_shape[0] - 0.5, 0.5)
-        c_range = np.arange(0, grid_shape[1] - 0.5, 0.5)
-        random_states = {(r, c): np.random.randint(1, MAX_SEED) for r in r_range for c in c_range}
+    if shape == 'overlap_center':
+        add_overlap(condition=center, radius=1.2, ctr=(grid_shape[0] / 2, grid_shape[1] / 2))
+
+    elif shape == 'overlap_cross':
+        add_overlap(condition=cross, size=grid_shape[0]//2, ctr=(grid_shape[0] / 2, grid_shape[1] / 2))
+
+    elif shape == 'overlap_edges':
+        add_overlap(condition=lambda r, c: (int(r) != r and int(c) == c) or (int(r) == r and int(c) != c))
+
+    elif shape == 'overlap_corners':
+        add_overlap(condition=lambda r, c: int(r) != r and int(c) != c)
+
+    elif shape == 'overlap_full':
+        add_overlap(condition=lambda r, c: True)
 
     else:  # no overlap
-        r_range = range(grid_shape[0])
-        c_range = range(grid_shape[1])
-        random_states = {(r, c): np.random.randint(1, MAX_SEED) for r in r_range for c in c_range}
-    np.random.seed()
-    if seed == 0:
+        pass
+    np.random.seed()  # restore randomness
+    if seed is None:  # identity mode
         for key in random_states:
-            random_states[key] = 0
+            random_states[key] = None
     return random_states
 
 
 def perm(shape, random_state):
     indexes = np.arange(shape[0] * shape[1])
-    if random_state == 0:  # identity
+    if random_state is None:  # identity
         return indexes
     return shuffle(indexes, random_state=random_state)
 

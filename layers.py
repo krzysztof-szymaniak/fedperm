@@ -1,12 +1,12 @@
 from keras.layers import Conv2D, MaxPooling2D, concatenate, GlobalAveragePooling2D, BatchNormalization, multiply, \
-    Activation, Dropout, MaxPool2D
+    Activation, Dropout, MaxPool2D, Softmax
 from keras.layers import Dense
 from keras.regularizers import l2
 
 weight_decay = 1e-4
 
 
-def SqueezeExcite(_in, ratio=8):
+def SqueezeExcite(_in, ratio=8, id=None):
     filters = _in.shape[-1]
     x = GlobalAveragePooling2D()(_in)
     x = Dense(filters // ratio, activation='relu', kernel_initializer='he_normal', use_bias=False,
@@ -16,10 +16,10 @@ def SqueezeExcite(_in, ratio=8):
     return multiply([_in, x])
 
 
-def ConvBlock(_in, filters, kernel_size, d_r=0.0, strides=(1, 1)):
+def ConvBlock(_in, filters, kernel_size, d_r=0.0, strides=(1, 1), name=None):
     x = _in
     x = Conv2D(filters, kernel_size, padding='same', strides=strides, activation='relu', kernel_initializer='he_normal',
-               kernel_regularizer=l2(weight_decay))(x)
+               kernel_regularizer=l2(weight_decay), name=name)(x)
     x = SqueezeExcite(x)
     x = BatchNormalization()(x)
     x = Activation("relu")(x)
@@ -27,12 +27,12 @@ def ConvBlock(_in, filters, kernel_size, d_r=0.0, strides=(1, 1)):
     return x
 
 
-def ReduceChannels(_in, channels=0):
+def ReduceChannels(_in, channels=0, name=None):
     return Conv2D(channels, (1, 1), padding='same', activation='relu', kernel_initializer='he_normal',
-                  kernel_regularizer=l2(weight_decay))(_in)
+                  kernel_regularizer=l2(weight_decay), name=name)(_in)
 
 
-def Inception(_in, filters=None):
+def Inception(_in, filters=None, name=None):
     if filters is None:
         filters = [10, 10, 10]
     col_1 = Conv2D(filters[0], (1, 1), padding='same', activation='relu', kernel_initializer='he_normal',
@@ -49,8 +49,18 @@ def Inception(_in, filters=None):
     col_3 = Conv2D(filters[2], (1, 1), padding='same', activation='relu', kernel_initializer='he_normal',
                    kernel_regularizer=l2(weight_decay))(col_3)
 
-    out = concatenate([col_1, col_2, col_3])  # output size W x H x (f0 + f1 + f2)
-    return out
+    _out = concatenate([col_1, col_2, col_3])  # output size W x H x (f0 + f1 + f2)
+    return _out
+
+
+def aggregate(models, n_classes):
+    x = concatenate(models)
+    x = Dense(128, activation='relu', kernel_initializer='he_normal', kernel_regularizer=l2(weight_decay))(x)
+    x = Dropout(0.3)(x)
+    x = Dense(64, activation='relu', kernel_initializer='he_normal', kernel_regularizer=l2(weight_decay))(x)
+    x = Dropout(0.3)(x)
+    x = Dense(n_classes, activation='softmax', kernel_initializer='he_normal', kernel_regularizer=l2(weight_decay))(x)
+    return x
 
 
 def cifar_submodel(_in):
@@ -98,6 +108,26 @@ def cifar_submodel(_in):
     return x
 
 
+def other_model(_in, n_outputs):
+    d_r = 0.15
+    x = _in
+    x = ConvBlock(x, filters=64, kernel_size=(7, 7), d_r=d_r, strides=(2, 2))
+    x = Inception(x, filters=[16, 16, 16])
+    x = Dropout(d_r)(x)
+    x = BatchNormalization()(x)
+    x = ConvBlock(x, filters=128, kernel_size=(5, 5), d_r=d_r, strides=(2, 2))
+    x = Inception(x, filters=[32, 32, 32])
+    x = Dropout(d_r)(x)
+    x = BatchNormalization()(x)
+    x = ConvBlock(x, filters=256, kernel_size=(3, 3), d_r=d_r, strides=(2, 2))
+    x = Inception(x, filters=[64, 64, 64])
+    x = Dropout(d_r)(x)
+    x = BatchNormalization()(x)
+    x = GlobalAveragePooling2D()(x)
+    x = Dense(n_outputs, activation='sigmoid', kernel_initializer='he_normal', kernel_regularizer=l2(weight_decay))(x)
+    return x
+
+
 def inception_model(_in, n_outputs):
     d_r = 0.15
     x = _in
@@ -128,4 +158,11 @@ def inception_model(_in, n_outputs):
     x = ReduceChannels(x, channels=n_outputs)
     x = BatchNormalization()(x)
     x = GlobalAveragePooling2D()(x)
+    x = Softmax()(x)
     return x
+
+
+def get_architecture(arch_id):
+    return {
+        0: other_model
+    }[arch_id]

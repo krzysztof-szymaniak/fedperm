@@ -1,4 +1,3 @@
-import os.path
 import sys
 from contextlib import redirect_stdout
 
@@ -6,83 +5,58 @@ from matplotlib import pyplot as plt
 from tensorflow.keras import Model
 from tensorflow.keras import utils
 from tensorflow.keras.callbacks import Callback
-from tensorflow.keras.layers import Dense, Input
-from tensorflow.keras.layers import concatenate, Dropout
-from tensorflow.keras.models import load_model
-from tensorflow.keras.regularizers import l2
+from tensorflow.keras.layers import Input
 
-from layers import inception_model
-
-weight_decay = 1e-5
+from layers import get_architecture, aggregate
 
 
-def SubModel(_in, name=None, n_outputs=None):
-    x = _in
-    x = inception_model(x, n_outputs)
-    _out = x
-    model = Model(inputs=_in, outputs=_out, name=name)
-    model.summary()
-    return model
+class ModelFactory:
+    def __init__(self, i_dir, n_classes, n_frames, input_shape, architecture_id):
+        self.arch_id = architecture_id
+        self.n_frames = n_frames
+        self.input_shape = input_shape
+        self.n_classes = n_classes
+        self.i_dir = i_dir
 
+    def get_model(self, model_type, n_outputs, name):
+        return {
+            'single': self.get_submodel,
+            'parallel': self.get_composite_model,
+        }[model_type](n_outputs, name)
 
-def get_aggregate_model(models_path, input_shape, n_classes, i_dir):
-    models = [load_model(m_p) for m_p in [os.path.join(models_path, m) for m in os.listdir(models_path)]]
-    _ins = [Input(shape=input_shape) for _ in models]
-    for m in models:
-        m.trainable = False
-    x = concatenate([m(_in) for m, _in in zip(models, _ins)])
-    x = Dense(256, activation='relu', kernel_initializer='he_normal', kernel_regularizer=l2(weight_decay))(x)
-    x = Dropout(0.3)(x)
-    x = Dense(128, activation='relu', kernel_initializer='he_normal', kernel_regularizer=l2(weight_decay))(x)
-    x = Dropout(0.3)(x)
-    x = Dense(n_classes, activation='softmax', kernel_initializer='he_normal', kernel_regularizer=l2(weight_decay))(x)
-    _out = x
-    model = Model(inputs=_ins, outputs=_out, name="aggregated-sequential")
-    model.summary()
-    utils.plot_model(model, show_layer_names=False, show_shapes=True, to_file=f'{i_dir}/submodel.png')
-    with open(f'{i_dir}/sub_summary.txt', 'w') as f:
-        with redirect_stdout(f):
-            model.summary()
-    return model
+    def save_model_info(self, model, filename):
+        utils.plot_model(model, show_layer_names=False, show_shapes=True, to_file=f'{self.i_dir}/{filename}.png')
+        with open(f'{self.i_dir}/{filename}.txt', 'w') as f:
+            with redirect_stdout(f):
+                model.summary()
 
+    def submodel(self, _in, n_outputs, name=None):
+        model = Model(inputs=_in, outputs=get_architecture(self.arch_id)(_in, n_outputs), name=name)
+        model.summary()
+        self.save_model_info(model, name)
+        return model
 
-def get_single_model(input_shape, n_classes, i, i_dir):
-    _in = Input(shape=input_shape)
-    x = inception_model(_in, 128)
-    x = Dense(n_classes, activation='softmax', kernel_initializer='he_normal', kernel_regularizer=l2(weight_decay))(x)
-    _out = x
-    model = Model(inputs=_in, outputs=_out, name=f"single-{i + 1}")
-    utils.plot_model(model, show_layer_names=False, show_shapes=True, to_file=f'{i_dir}/submodel.png')
-    with open(f'{i_dir}/sub_summary.txt', 'w') as f:
-        with redirect_stdout(f):
-            model.summary()
-    return model
+    def get_submodel(self, n_outputs, name):
+        _in = Input(shape=self.input_shape)
+        return self.submodel(_in, name=name, n_outputs=n_outputs)
 
+    def get_composite_model(self, n_outputs, name):
+        _ins = [Input(shape=self.input_shape) for _ in range(self.n_frames)]
+        model_outputs = []
+        for i, _in in enumerate(_ins):
+            subname = f'sub-{i}'
+            submodel = self.submodel(_in, n_outputs, name=subname)
+            if i == 0:
+                self.save_model_info(submodel, subname)
+            model_outputs.append(submodel)
+        model = self.get_aggregating_model(_ins, model_outputs, name)
+        return model
 
-def get_composite_model(input_shape, n_classes, n_frames, i_dir):
-    _ins = [Input(shape=input_shape) for _ in range(n_frames)]
-    model_outputs = []
-    for i, _in in enumerate(_ins):
-        submodel = SubModel(_in, name=f"federated-{i}", n_outputs=128)
-        if i == 0:
-            utils.plot_model(submodel, show_layer_names=False, show_shapes=True, to_file=f'{i_dir}/submodel.png')
-            with open(f'{i_dir}/sub_summary.txt', 'w') as f:
-                with redirect_stdout(f):
-                    submodel.summary()
-        model_outputs.append(submodel(_in))
-    aggr = concatenate(model_outputs, axis=-1)
-    aggr = Dropout(0.3)(aggr)
-    aggr = Dense(256, activation='relu', kernel_initializer='he_normal', kernel_regularizer=l2(weight_decay))(aggr)
-    aggr = Dropout(0.3)(aggr)
-    _out = Dense(n_classes, activation='softmax', kernel_initializer='he_normal', kernel_regularizer=l2(weight_decay))(
-        aggr)
-    ensemble_model = Model(inputs=_ins, outputs=_out, name="aggregated_model")
-    ensemble_model.summary()
-    utils.plot_model(ensemble_model, show_layer_names=False, show_shapes=True, to_file=f'{i_dir}/model.png')
-    with open(f'{i_dir}/summary.txt', 'w') as f:
-        with redirect_stdout(f):
-            ensemble_model.summary()
-    return ensemble_model
+    def get_aggregating_model(self, inputs, outputs, name):
+        _out = aggregate([m(_in) for m, _in in zip(outputs, inputs)], self.n_classes)
+        model = Model(inputs=inputs, outputs=_out, name=name)
+        self.save_model_info(model, name)
+        return model
 
 
 class PlotProgress(Callback):
