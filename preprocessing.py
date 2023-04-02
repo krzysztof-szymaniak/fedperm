@@ -1,14 +1,13 @@
-import os
-import pathlib
 from os.path import join
 
+import cv2
 import imageio
 import numpy as np
 import tensorflow as tf
+import tensorflow_datasets as tfds
 from PIL import Image
-from matplotlib import pyplot as plt, patches
+from keras.utils.np_utils import to_categorical
 from tensorflow.keras.preprocessing.image import ImageDataGenerator
-from tensorflow.keras.utils import to_categorical
 
 
 def permute(arr, perm):
@@ -19,14 +18,23 @@ def permute(arr, perm):
     return res
 
 
-def get_gen(augmented=True):
-    return ImageDataGenerator(
-        rescale=1 / 255,
-        rotation_range=15,  # randomly rotate images in the range (degrees, 0 to 180)
-        zoom_range=0.1,  # Randomly zoom image
-        width_shift_range=0.2,  # randomly shift images horizontally (fraction of total width)
-        height_shift_range=0.2,  # randomly shift images vertically (fraction of total height)
-    ) if augmented else ImageDataGenerator(rescale=1. / 255)
+def pad(img, dims=None):
+    old_image_height, old_image_width, channels = img.shape
+    new_image_width, new_image_height, _ = dims
+    color = (0, 0, 0)
+    result = np.full(dims, color, dtype=np.uint8)
+
+    x_center = (new_image_width - old_image_width) // 2
+    y_center = (new_image_height - old_image_height) // 2
+    result[y_center:y_center + old_image_height, x_center:x_center + old_image_width] = img
+    return result
+
+
+def resize_img(img, scale):
+    width = int(img.shape[1] * scale)
+    height = int(img.shape[0] * scale)
+    dim = (width, height)
+    return np.array(Image.fromarray(img).resize(dim, resample=Image.NEAREST))
 
 
 class PermutationGenerator(tf.keras.utils.Sequence):
@@ -45,6 +53,7 @@ class PermutationGenerator(tf.keras.utils.Sequence):
         self.debug_path = debug_path
 
     def run_debug(self, index):
+        scale = 20
         if self.debug_path is None:
             return
         x = self.X[index]
@@ -52,43 +61,34 @@ class PermutationGenerator(tf.keras.utils.Sequence):
         sr, sc, channels = self.subinput_shape
 
         subimages = self.generate_frames(np.array([x]))
-        pathlib.Path("tmp").mkdir(exist_ok=True)
-        pathes = []
-        imgs = []
-        for i, (row, col) in enumerate(self.permutations):
-            if int(row) == row and int(col) == col:
-                color = 'g'
-                width = 3
-            elif int(row) == row or int(col) == col:
-                color = 'b'
-                width = 2
-            else:
-                color = 'r'
-                width = 1
-            rect = patches.Rectangle((int(row * sr), int(col * sc)), sr, sc, linewidth=width, edgecolor=color,
-                                     facecolor='none')
-            pathes.append(rect)
-
-        fig, ax = plt.subplots(1, 2, )
         if channels == 1:
-            x = np.array(Image.fromarray(x[..., 0], mode='L').convert('RGB'))
-        ax[0].imshow(x)
-        for i, (patch, subimg) in enumerate(zip(pathes, subimages)):
-            subimg = subimg[0, ...]
+            x = cv2.cvtColor(x, cv2.COLOR_GRAY2RGB)
+        imgs = []
+        x = resize_img(x, scale=scale)
+        for i, ((row, col), subimg) in enumerate(zip(self.permutations, subimages)):
+            if int(row) == row and int(col) == col:
+                color = (0, 255, 0)
+                width = 5
+            elif int(row) == row or int(col) == col:
+                color = (0, 0, 255)
+                width = 3
+            else:
+                color = (255, 0, 0)
+                width = 1
+            x = cv2.rectangle(x,
+                              (int(row * sr) * scale, int(col * sc) * scale),
+                              (int((row + 1) * sr * scale), int((col + 1) * sc) * scale),
+                              color, width)
+            subimg = subimg[0, ...].astype('uint8')
             if channels == 1:
-                subimg = np.array(Image.fromarray(subimg[..., 0], mode='L').convert('RGB'))
-            im_path = f'tmp/{i}.png'
-            ax[0].add_patch(patch)
-            ax[1].clear()
-            ax[1].imshow(subimg)
-            fig.savefig(im_path)
-            imgs.append(plt.imread(im_path))
-            if i == len(pathes) - 1:
-                extent = ax[0].get_window_extent().transformed(fig.dpi_scale_trans.inverted())
-                fig.savefig(join(self.debug_path, f'grid_{index}.png'), bbox_inches=extent.expanded(1.1, 1.2))
+                subimg = cv2.cvtColor(subimg, cv2.COLOR_GRAY2RGB)
+            subimg = resize_img(subimg, scale=scale)
+            padded = pad(subimg, x.shape)
+            res = np.hstack((x, padded))
+            imgs.append(res)
         gif_path = join(self.debug_path, f'frames_{index}.gif')
         imageio.mimsave(gif_path, imgs, fps=55, duration=0.5)
-        os.startfile(gif_path)
+        # os.system(f'xdg-open {gif_path}')
 
     def next(self):
         x, y = self.gen.next()
@@ -119,17 +119,55 @@ class PermutationGenerator(tf.keras.utils.Sequence):
 
 
 def load_data(dataset):
-    (x_train, y_train), (x_test, y_test) = dataset.load_data()
-    y_train = y_train.ravel()
-    y_test = y_test.ravel()
-    classes = np.unique(y_train)
-    n_classes = len(classes)
-    y_train = to_categorical(y_train, n_classes)
-    y_test = to_categorical(y_test, n_classes)
-    if len(x_train.shape) == 3:
-        x_train = np.expand_dims(x_train, axis=-1)
-        x_test = np.expand_dims(x_test, axis=-1)
-    return (x_train, y_train), (x_test, y_test), n_classes
+    if type(dataset) != str:
+        (x_train, y_train), (x_test, y_test) = dataset.load_data()
+        y_train = y_train.ravel()
+        y_test = y_test.ravel()
+        classes = np.unique(y_train)
+        n_classes = len(classes)
+        y_train = to_categorical(y_train, num_classes=n_classes)
+        y_test = to_categorical(y_test, num_classes=n_classes)
+        if len(x_train.shape) == 3:
+            x_train = np.expand_dims(x_train, axis=-1)
+            x_test = np.expand_dims(x_test, axis=-1)
+        return (x_train, y_train), (x_test, y_test), n_classes
+    else:
+        if dataset == 'kmnist':
+            trainDataset = tfds.load(name=dataset, split='train', as_supervised=True)
+            testDataset = tfds.load(name=dataset, split='test', as_supervised=True)
+            x_train = np.asarray(list(map(lambda x: x[0], tfds.as_numpy(trainDataset))))
+            y_train = np.asarray(list(map(lambda x: x[1], tfds.as_numpy(trainDataset))))
+
+            x_test = np.asarray(list(map(lambda x: x[0], tfds.as_numpy(testDataset))))
+            y_test = np.asarray(list(map(lambda x: x[1], tfds.as_numpy(testDataset))))
+
+            classes = np.unique(y_train)
+            n_classes = len(classes)
+            y_train = to_categorical(y_train, num_classes=n_classes)
+            y_test = to_categorical(y_test, num_classes=n_classes)
+            return (x_train, y_train), (x_test, y_test), n_classes
+        else:
+            HEIGHT = 200
+            WIDTH = 200
+
+            def preprocess(img, label):
+                return tf.cast(tf.image.resize(img, [HEIGHT, WIDTH]), tf.uint8), tf.cast(label, tf.float32)
+
+            split = ['train[:70%]', 'train[70%:]']
+
+            trainDataset, testDataset = tfds.load(name=dataset, split=split, as_supervised=True)
+
+            testDataset = testDataset.map(preprocess)
+            trainDataset = trainDataset.map(preprocess)
+            x_train = np.asarray(list(map(lambda x: x[0], tfds.as_numpy(trainDataset))))
+            y_train = np.asarray(list(map(lambda x: x[1], tfds.as_numpy(trainDataset))))
+
+            x_test = np.asarray(list(map(lambda x: x[0], tfds.as_numpy(testDataset))))
+            y_test = np.asarray(list(map(lambda x: x[1], tfds.as_numpy(testDataset))))
+
+            classes = np.unique(y_train)
+            n_classes = len(classes)
+            return (x_train, y_train), (x_test, y_test), n_classes
 
 
 if __name__ == '__main__':

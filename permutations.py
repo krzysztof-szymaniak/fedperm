@@ -33,7 +33,7 @@ def init_states(seed, grid_shape, shape):
                     random_states[(r, c)] = np.random.randint(1, MAX_STATE)
 
     if shape == 'overlap_center':
-        add_overlap(condition=center, radius=1.2, ctr=(grid_shape[0] / 2, grid_shape[1] / 2))
+        add_overlap(condition=center, radius=0, ctr=(grid_shape[0] / 2, grid_shape[1] / 2))
 
     elif shape == 'overlap_cross':
         add_overlap(condition=cross, size=grid_shape[0]//2, ctr=(grid_shape[0] / 2, grid_shape[1] / 2))
