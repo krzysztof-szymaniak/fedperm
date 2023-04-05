@@ -2,6 +2,8 @@ from os.path import join
 
 import cv2
 import imageio
+import matplotlib.pyplot as plt
+from keras.datasets import cifar10, fashion_mnist, mnist
 import numpy as np
 import tensorflow as tf
 import tensorflow_datasets as tfds
@@ -68,13 +70,13 @@ class PermutationGenerator(tf.keras.utils.Sequence):
         for i, ((row, col), subimg) in enumerate(zip(self.permutations, subimages)):
             if int(row) == row and int(col) == col:
                 color = (0, 255, 0)
-                width = 5
+                width = 2
             elif int(row) == row or int(col) == col:
                 color = (0, 0, 255)
-                width = 3
+                width = 5
             else:
                 color = (255, 0, 0)
-                width = 1
+                width = 7
             x = cv2.rectangle(x,
                               (int(row * sr) * scale, int(col * sc) * scale),
                               (int((row + 1) * sr * scale), int((col + 1) * sc) * scale),
@@ -118,56 +120,104 @@ class PermutationGenerator(tf.keras.utils.Sequence):
         return x_frames
 
 
+def convert_ds_to_numpy(ds):
+    x = np.asarray(list(map(lambda v: v[0], tfds.as_numpy(ds))))
+    y = np.asarray(list(map(lambda v: v[1], tfds.as_numpy(ds))))
+    return x, y
+
+
+def to_categorical_n_classes(x_train, y_train, x_test, y_test):
+    classes = np.unique(y_train)
+    n_classes = len(classes)
+    y_train = to_categorical(y_train, num_classes=n_classes)
+    y_test = to_categorical(y_test, num_classes=n_classes)
+    if len(x_train.shape) == 3:
+        x_train = np.expand_dims(x_train, axis=-1)
+        x_test = np.expand_dims(x_test, axis=-1)
+    return (x_train, y_train), (x_test, y_test), n_classes
+
+
 def load_data(dataset):
-    if type(dataset) != str:
-        (x_train, y_train), (x_test, y_test) = dataset.load_data()
+    if dataset in ['mnist', 'fashion_mnist', 'cifar10']:
+        ds = {
+            'mnist': mnist,
+            'fashion_mnist': fashion_mnist,
+            'cifar10': cifar10,
+        }[dataset]
+        (x_train, y_train), (x_test, y_test) = ds.load_data()
         y_train = y_train.ravel()
         y_test = y_test.ravel()
-        classes = np.unique(y_train)
-        n_classes = len(classes)
-        y_train = to_categorical(y_train, num_classes=n_classes)
-        y_test = to_categorical(y_test, num_classes=n_classes)
-        if len(x_train.shape) == 3:
-            x_train = np.expand_dims(x_train, axis=-1)
-            x_test = np.expand_dims(x_test, axis=-1)
-        return (x_train, y_train), (x_test, y_test), n_classes
-    else:
-        if dataset == 'kmnist':
-            trainDataset = tfds.load(name=dataset, split='train', as_supervised=True)
-            testDataset = tfds.load(name=dataset, split='test', as_supervised=True)
-            x_train = np.asarray(list(map(lambda x: x[0], tfds.as_numpy(trainDataset))))
-            y_train = np.asarray(list(map(lambda x: x[1], tfds.as_numpy(trainDataset))))
+        return to_categorical_n_classes(x_train, y_train, x_test, y_test)
+    if dataset == 'emnist-letters':
+        dataset = dataset.replace('-', '/')
 
-            x_test = np.asarray(list(map(lambda x: x[0], tfds.as_numpy(testDataset))))
-            y_test = np.asarray(list(map(lambda x: x[1], tfds.as_numpy(testDataset))))
+        def transpose(x):
+            return tf.image.flip_left_right(tf.image.rot90(x, -1))
 
-            classes = np.unique(y_train)
-            n_classes = len(classes)
-            y_train = to_categorical(y_train, num_classes=n_classes)
-            y_test = to_categorical(y_test, num_classes=n_classes)
-            return (x_train, y_train), (x_test, y_test), n_classes
-        else:
-            HEIGHT = 200
-            WIDTH = 200
+        trainDataset = tfds.load(name=dataset, split='train', as_supervised=True).map(
+            lambda x, y: (transpose(x), y - 1))
+        testDataset = tfds.load(name=dataset, split='test', as_supervised=True).map(
+            lambda x, y: (transpose(x), y - 1))
+        x_train, y_train = convert_ds_to_numpy(trainDataset)
+        x_test, y_test = convert_ds_to_numpy(testDataset)
+        return to_categorical_n_classes(x_train, y_train, x_test, y_test)
 
-            def preprocess(img, label):
-                return tf.cast(tf.image.resize(img, [HEIGHT, WIDTH]), tf.uint8), tf.cast(label, tf.float32)
+    elif dataset == 'eurosat':
+        split = ['train[:80%]', 'train[80%:]']
+        trainDataset, testDataset = tfds.load(name=dataset, split=split, as_supervised=True)
+        x_train, y_train = convert_ds_to_numpy(trainDataset)
+        x_test, y_test = convert_ds_to_numpy(testDataset)
+        return to_categorical_n_classes(x_train, y_train, x_test, y_test)
+    elif dataset == 'cats_vs_dogs':
+        HEIGHT = 200
+        WIDTH = 200
 
-            split = ['train[:70%]', 'train[70%:]']
+        def preprocess(img, label):
+            return tf.cast(tf.image.resize(img, [HEIGHT, WIDTH]), tf.uint8), tf.cast(label, tf.float32)
 
-            trainDataset, testDataset = tfds.load(name=dataset, split=split, as_supervised=True)
+        split = ['train[:80%]', 'train[80%:]']
+        trainDataset, testDataset = tfds.load(name=dataset, split=split, as_supervised=True)
+        testDataset = testDataset.map(preprocess)
+        trainDataset = trainDataset.map(preprocess)
+        x_train, y_train = convert_ds_to_numpy(trainDataset)
+        x_test, y_test = convert_ds_to_numpy(testDataset)
+        return to_categorical_n_classes(x_train, y_train, x_test, y_test)
 
-            testDataset = testDataset.map(preprocess)
-            trainDataset = trainDataset.map(preprocess)
-            x_train = np.asarray(list(map(lambda x: x[0], tfds.as_numpy(trainDataset))))
-            y_train = np.asarray(list(map(lambda x: x[1], tfds.as_numpy(trainDataset))))
 
-            x_test = np.asarray(list(map(lambda x: x[0], tfds.as_numpy(testDataset))))
-            y_test = np.asarray(list(map(lambda x: x[1], tfds.as_numpy(testDataset))))
+def get_classes_names_for_dataset(ds_name):
+    fashion_names = """
+        T-shirt/top
+        Trouser
+        Pullover
+        Dress
+        Coat
+        Sandal
+        Shirt
+        Sneaker
+        Bag
+        Ankle boot
+        """
+    cifar_names = """airplane
+        automobile
+        bird
+        cat
+        deer
+        dog
+        frog
+        horse
+        ship
+        truck"""
 
-            classes = np.unique(y_train)
-            n_classes = len(classes)
-            return (x_train, y_train), (x_test, y_test), n_classes
+    classes = None
+    if ds_name == 'mnist':
+        classes = [i for i in range(10)]
+    elif ds_name == 'fashion':
+        classes = [c for c in fashion_names.split("\n") if c]
+    elif ds_name == 'cifar10':
+        classes = [c for c in cifar_names.split("\n") if c]
+    elif ds_name == 'cats_vs_dogs':
+        classes = ['cat', 'dog']
+    return classes
 
 
 if __name__ == '__main__':

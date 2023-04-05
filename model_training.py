@@ -10,12 +10,12 @@ from pretty_confusion_matrix import pp_matrix_from_data
 from sklearn.metrics import classification_report, accuracy_score
 from tensorflow.keras.backend import binary_crossentropy, categorical_crossentropy
 from tensorflow.keras.callbacks import Callback
-from tensorflow.keras.callbacks import EarlyStopping, TensorBoard
+from tensorflow.keras.callbacks import EarlyStopping, TensorBoard, LearningRateScheduler
 from tensorflow.keras.callbacks import ReduceLROnPlateau
 from tensorflow.keras.layers import Input
 from tensorflow.keras.metrics import Precision, Recall
 from tensorflow.keras.models import load_model
-from tensorflow.keras.optimizers import Adam
+from tensorflow.keras.optimizers import Adam, SGD
 from tensorflow.keras.preprocessing.image import ImageDataGenerator
 
 from model import ModelFactory
@@ -23,14 +23,9 @@ from preprocessing import PermutationGenerator
 
 
 def scheduler(epoch, lr):
-    if epoch < 20:
-        return 0.1
-    if epoch < 40:
-        return 0.01
-    if epoch < 60:
-        return 0.001
-    else:
-        return max(lr * tf.math.exp(-0.01), 1e-6)
+    if epoch < 30:
+        return lr
+    return max(lr * tf.math.exp(-0.1), 1e-6)
 
 
 class ModelTraining:
@@ -38,10 +33,10 @@ class ModelTraining:
     debug_dir = 'debug'
     arch_dir = 'architecture'
 
-    batch_size = 64
+    batch_size = 32
     epochs = 1000
-    EARLY_STOPPING_PATIENCE = 20
-    lr_patience = 8
+    EARLY_STOPPING_PATIENCE = 16
+    lr_patience = 5
     lr = 1e-3
 
     augmented = True
@@ -72,7 +67,7 @@ class ModelTraining:
                           restore_best_weights=True),
             # LearningRateScheduler(scheduler),
             ReduceLROnPlateau(monitor="val_loss", factor=0.2, patience=self.lr_patience, verbose=1, min_lr=1e-7),
-            PlotProgress(self.training_info_dir, plot_lr=True),
+            PlotProgress(self.training_info_dir),
             TensorBoard(log_dir=f'./{self.model_name}/graph', histogram_freq=1, write_graph=True,
                         write_images=True)
         ]
@@ -97,11 +92,13 @@ class ModelTraining:
             height_shift_range=0.2,  # randomly shift images vertically (fraction of total height)
             shear_range=20,
             horizontal_flip=True,
+            vertical_flip=True,
         ) if augmented else ImageDataGenerator(rescale=1. / 255)
         gen = PermutationGenerator(x, y, aug, self.subinput_shape, permutations=self.permutations,
                                    batch_size=batch_size, debug_path=self.debug_info_dir, shuffle_dataset=shuffle)
         if debug:
-            gen.run_debug(ind)
+            for i in range(10):
+                gen.run_debug(np.random.randint(ind))
         return gen
 
     def set_up(self):
@@ -124,10 +121,10 @@ class ModelTraining:
         self.set_up()
         train_ds = self.get_perm_images_generator(x_train, y_train, batch_size=self.batch_size,
                                                   augmented=self.augmented, debug=True,
-                                                  ind=np.random.randint(len(x_train)))
+                                                  ind=len(x_train))
         valid_ds = self.get_perm_images_generator(x_val, y_val, batch_size=self.batch_size,
                                                   augmented=False, debug=True,
-                                                  ind=np.random.randint(len(x_val)))
+                                                  ind=len(x_val))
 
         self.model = self.model_factory.get_model(self.model_type, self.n_classes)
         self.model.compile(**self.compile_opts())
@@ -200,6 +197,12 @@ class TrainingSequential(ModelTraining):
 
     def fit(self, x_train, y_train, x_val, y_val):
         self.set_up()
+        train_ds = self.get_perm_images_generator(x_train, y_train, batch_size=self.batch_size,
+                                                  augmented=self.augmented, debug=True,
+                                                  ind=len(x_train))
+        valid_ds = self.get_perm_images_generator(x_val, y_val, batch_size=self.batch_size,
+                                                  augmented=False, debug=True,
+                                                  ind=len(x_val))
         for i, (coords, perm) in enumerate(self.permutations.items()):
             sub_model = join(self.model_name, "subs", str(i))
             self.sub_models.append(sub_model)
@@ -207,15 +210,6 @@ class TrainingSequential(ModelTraining):
                               'single',
                               self.classes_names)
             m.fit(x_train, y_train, x_val, y_val)
-
-        train_ds = self.get_perm_images_generator(x_train, y_train, batch_size=self.batch_size,
-                                                  augmented=self.augmented, debug=self.debug,
-                                                  ind=np.random.randint(len(x_train)))
-        valid_ds = self.get_perm_images_generator(x_val, y_val, batch_size=self.batch_size,
-                                                  augmented=False, debug=True,
-                                                  ind=np.random.randint(len(x_val)))
-        for m_p in self.sub_models:
-            model = load_model(m_p)
 
         models = [load_model(m_p) for m_p in self.sub_models]
         for m in models:
@@ -249,7 +243,7 @@ class PlotProgress(Callback):
     loss_ep = 0
     val_loss_ep = 0
 
-    def __init__(self, i_dir, plot_lr=True, verbose=True):
+    def __init__(self, i_dir, verbose=True):
         super().__init__()
         self.verbose = verbose
         self.axs = None
@@ -258,7 +252,6 @@ class PlotProgress(Callback):
         self.i_dir = join(i_dir, 'progress')
         pathlib.Path(self.i_dir).mkdir(exist_ok=True, parents=True)
         self.first_epoch = True
-        self.plot_lr = plot_lr
 
     def on_train_begin(self, logs=None):
         plt.ion()
