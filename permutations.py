@@ -1,8 +1,17 @@
 import numpy as np
 from sklearn.utils import shuffle
 
+from enum import Enum
+
 MAX_STATE = 10000000
 
+
+class Overlap(Enum):
+    CENTER = 'center'
+    CROSS = 'cross'
+    EDGES = 'edges'
+    CORNERS = 'corners'
+    FULL = 'full'
 
 def cross(r, c, size=None, ctr=None):
     return (r == ctr[0] - 0.5 and abs(c - ctr[1] - 0.5 <= size)) or (
@@ -26,19 +35,19 @@ def init_states(seed, grid_shape, overlap):
                 if (r, c) not in random_states and condition(r, c, **kwargs):
                     random_states[(r, c)] = np.random.randint(1, MAX_STATE)
 
-    if overlap == 'center':
+    if overlap == Overlap.CENTER.value:
         add_overlap(condition=center, radius=0, ctr=(grid_shape[0] / 2, grid_shape[1] / 2))
 
-    elif overlap == 'cross':
+    elif overlap == Overlap.CROSS.value:
         add_overlap(condition=cross, size=grid_shape[0] // 2, ctr=(grid_shape[0] / 2, grid_shape[1] / 2))
 
-    elif overlap == 'edges':
+    elif overlap == Overlap.EDGES.value:
         add_overlap(condition=lambda r, c: (int(r) != r and int(c) == c) or (int(r) == r and int(c) != c))
 
-    elif overlap == 'corners':
+    elif overlap == Overlap.CORNERS.value:
         add_overlap(condition=lambda r, c: int(r) != r and int(c) != c)
 
-    elif overlap == 'full':
+    elif overlap == Overlap.FULL.value:
         add_overlap(condition=lambda r, c: True)
 
     else:  # no overlap

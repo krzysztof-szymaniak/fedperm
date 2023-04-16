@@ -181,40 +181,29 @@ def load_data(dataset):
         trainDataset = trainDataset.map(preprocess)
         x_train, y_train = convert_ds_to_numpy(trainDataset)
         x_test, y_test = convert_ds_to_numpy(testDataset)
+        classes = np.unique(y_train)
+        n_classes = len(classes)
+        return (x_train, y_train), (x_test, y_test), n_classes
+
+    elif dataset == 'kmnist':
+        trainDataset = tfds.load(name=dataset, split='train', as_supervised=True)
+        testDataset = tfds.load(name=dataset, split='test', as_supervised=True)
+        x_train, y_train = convert_ds_to_numpy(trainDataset)
+        x_test, y_test = convert_ds_to_numpy(testDataset)
         return to_categorical_n_classes(x_train, y_train, x_test, y_test)
+    else:
+        raise Exception("No dataset with name " + dataset)
 
 
 def get_classes_names_for_dataset(ds_name):
-    fashion_names = """
-        T-shirt/top
-        Trouser
-        Pullover
-        Dress
-        Coat
-        Sandal
-        Shirt
-        Sneaker
-        Bag
-        Ankle boot
-        """
-    cifar_names = """airplane
-        automobile
-        bird
-        cat
-        deer
-        dog
-        frog
-        horse
-        ship
-        truck"""
-
     classes = None
     if ds_name == 'mnist':
         classes = [i for i in range(10)]
-    elif ds_name == 'fashion':
-        classes = [c for c in fashion_names.split("\n") if c]
+    elif ds_name == 'fashion_mnist':
+        classes = ['T-shirt/top', 'Trouser', 'Pullover', 'Dress', 'Coat', 'Sandal', 'Shirt', 'Sneaker', 'Bag',
+                   'Ankle boot']
     elif ds_name == 'cifar10':
-        classes = [c for c in cifar_names.split("\n") if c]
+        classes = ['airplane', 'automobile', 'bird', 'cat', 'deer', 'dog', 'frog', 'horse', 'ship', 'truck']
     elif ds_name == 'cats_vs_dogs':
         classes = ['cat', 'dog']
     return classes

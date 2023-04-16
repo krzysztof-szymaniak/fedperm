@@ -10,8 +10,8 @@ from pretty_confusion_matrix import pp_matrix_from_data
 from sklearn.metrics import classification_report, accuracy_score
 from tensorflow.keras.backend import binary_crossentropy, categorical_crossentropy
 from tensorflow.keras.callbacks import Callback
-from tensorflow.keras.callbacks import EarlyStopping, TensorBoard, LearningRateScheduler
-from tensorflow.keras.callbacks import ReduceLROnPlateau
+from tensorflow.keras.callbacks import EarlyStopping, TensorBoard, LearningRateScheduler, ModelCheckpoint, \
+    ReduceLROnPlateau
 from tensorflow.keras.layers import Input
 from tensorflow.keras.metrics import Precision, Recall
 from tensorflow.keras.models import load_model
@@ -21,29 +21,42 @@ from tensorflow.keras.preprocessing.image import ImageDataGenerator
 from model import ModelFactory
 from preprocessing import PermutationGenerator
 
+info_dir_name = "train"
+debug_dir_name = 'data_examples'
+arch_dir_name = 'architecture'
+testing_dir_name = 'test'
 
-def scheduler(epoch, lr):
-    if epoch < 30:
-        return lr
-    return max(lr * tf.math.exp(-0.1), 1e-6)
+batch_size = 128
+epochs = 300
+es_patience = 20
+lr_patience = 16
+lr = 3e-4
+
+
+def scheduler(epoch, learning_rate):
+    if epoch < 20:
+        return learning_rate
+    return max(learning_rate * tf.math.exp(-0.1), 1e-7)
+
+
+def compile_opts():
+    opts = {
+        "loss": categorical_crossentropy,
+        # 'loss': binary_crossentropy,
+        "optimizer": Adam(learning_rate=lr),
+        # "optimizer": SGD(learning_rate=lr, momentum=0.9, nesterov=True),
+        # "metrics": ['accuracy', Precision(), Recall()],
+        "metrics": ['accuracy'],
+    }
+    return opts
 
 
 class ModelTraining:
-    info_dir = "training_info"
-    debug_dir = 'debug'
-    arch_dir = 'architecture'
-
-    batch_size = 32
-    epochs = 1000
-    EARLY_STOPPING_PATIENCE = 16
-    lr_patience = 5
-    lr = 1e-3
-
     augmented = True
     debug = True
 
-    def __init__(self, model_name, subinput_shape, n_classes, architecture_id, permutations, model_type, classes_names):
-        self.architecture_id = architecture_id
+    def __init__(self, model_name, subinput_shape, n_classes, permutations, model_type, classes_names,
+                 m_id=None):
         self.model_type = model_type
         self.classes_names = classes_names
         self.model_name = model_name
@@ -56,32 +69,26 @@ class ModelTraining:
         self.training_info_dir = None
         self.debug_info_dir = None
         self.arch_info_dir = None
+        self.checkpoints_dir = None
         self.model_factory = None
         self.subinput_shape = subinput_shape
+        self.m_id = m_id
+        self.set_up()
 
         print(f"Model name: {self.model_name}")
 
     def callbacks(self):
         return [
-            EarlyStopping(monitor="val_loss", verbose=1, patience=self.EARLY_STOPPING_PATIENCE,
-                          restore_best_weights=True),
+            ModelCheckpoint(filepath=join(self.checkpoints_dir, 'weights.h5'),
+                            save_freq='epoch', verbose=0, monitor='val_loss',
+                            save_weights_only=True, save_best_only=True),
+            EarlyStopping(monitor="val_loss", verbose=1, patience=es_patience, restore_best_weights=True),
             # LearningRateScheduler(scheduler),
-            ReduceLROnPlateau(monitor="val_loss", factor=0.2, patience=self.lr_patience, verbose=1, min_lr=1e-7),
+            ReduceLROnPlateau(monitor="val_loss", factor=0.2, patience=lr_patience, verbose=1, min_lr=1e-7),
             PlotProgress(self.training_info_dir),
             TensorBoard(log_dir=f'./{self.model_name}/graph', histogram_freq=1, write_graph=True,
                         write_images=True)
         ]
-
-    def compile_opts(self):
-        opts = {
-            "loss": categorical_crossentropy,
-            # 'loss': binary_crossentropy,
-            "optimizer": Adam(learning_rate=self.lr),
-            # "optimizer": SGD(learning_rate=self.lr, momentum=0.9, nesterov=True),
-            # "metrics": ['accuracy', Precision(), Recall()],
-            "metrics": ['accuracy'],
-        }
-        return opts
 
     def get_perm_images_generator(self, x, y, augmented, debug=False, ind=0, batch_size=None, shuffle=True):
         aug = ImageDataGenerator(
@@ -92,83 +99,100 @@ class ModelTraining:
             height_shift_range=0.2,  # randomly shift images vertically (fraction of total height)
             shear_range=20,
             horizontal_flip=True,
-            vertical_flip=True,
+            # vertical_flip=True,
         ) if augmented else ImageDataGenerator(rescale=1. / 255)
         gen = PermutationGenerator(x, y, aug, self.subinput_shape, permutations=self.permutations,
                                    batch_size=batch_size, debug_path=self.debug_info_dir, shuffle_dataset=shuffle)
         if debug:
-            for i in range(10):
+            for i in range(5):
                 gen.run_debug(np.random.randint(ind))
         return gen
 
     def set_up(self):
-        self.training_info_dir = join(self.model_name, self.info_dir)
-        self.debug_info_dir = join(self.model_name, self.debug_dir)
-        self.arch_info_dir = join(self.model_name, self.arch_dir)
+        self.training_info_dir = join(self.model_name, info_dir_name)
+        self.debug_info_dir = join(self.model_name, debug_dir_name)
+        self.arch_info_dir = join(self.model_name, arch_dir_name)
+        self.checkpoints_dir = join(self.model_name, 'checkpoint')
         pathlib.Path(self.training_info_dir).mkdir(exist_ok=True, parents=True)
         pathlib.Path(self.debug_info_dir).mkdir(exist_ok=True, parents=True)
         pathlib.Path(self.arch_info_dir).mkdir(exist_ok=True, parents=True)
+        pathlib.Path(self.checkpoints_dir).mkdir(exist_ok=True, parents=True)
         self.model_factory = ModelFactory(self.arch_info_dir, self.n_classes, len(self.permutations),
                                           self.subinput_shape,
-                                          self.architecture_id)
-        with open(join(self.training_info_dir, "permutations.txt"), 'w') as f:
-            f.write(str(self.permutations).replace('array', 'np.array'))
+                                          )
 
     def fit(self, x_train, y_train, x_val, y_val):
         if exists(join(self.model_name, 'saved_model.pb')):
             print("Model already trained, skipping")
             return
-        self.set_up()
-        train_ds = self.get_perm_images_generator(x_train, y_train, batch_size=self.batch_size,
+
+        with open(join(self.model_name, "permutations.txt"), 'w') as f:
+            f.write(str(self.permutations).replace('array', 'np.array'))
+
+        train_ds = self.get_perm_images_generator(x_train, y_train, batch_size=batch_size,
                                                   augmented=self.augmented, debug=True,
                                                   ind=len(x_train))
-        valid_ds = self.get_perm_images_generator(x_val, y_val, batch_size=self.batch_size,
+        valid_ds = self.get_perm_images_generator(x_val, y_val, batch_size=batch_size,
                                                   augmented=False, debug=True,
                                                   ind=len(x_val))
 
-        self.model = self.model_factory.get_model(self.model_type, self.n_classes)
-        self.model.compile(**self.compile_opts())
+        self.model = self.model_factory.get_model(self.model_type, self.n_classes, m_id=self.m_id)
+        self.model.compile(**compile_opts())
 
         try:
-            self.model.fit(train_ds, epochs=self.epochs, verbose=1, validation_data=valid_ds,
-                           steps_per_epoch=len(x_train) // self.batch_size,
-                           validation_steps=len(x_val) // self.batch_size,
+            self.model.fit(train_ds, epochs=epochs, verbose=1, validation_data=valid_ds,
+                           steps_per_epoch=len(x_train) // batch_size,
+                           validation_steps=len(x_val) // batch_size,
                            callbacks=self.callbacks())
         except KeyboardInterrupt:
             print("\nInterrupted!")
+            self.model.load_weights(join(self.checkpoints_dir, 'weights.h5'))
         print(f"Saving model {self.model_name}")
         self.model.save(self.model_name)
         self.save_training_info(show=False)
         return self.model
 
     def predict(self, x_test, y_test):
-        self.model = load_model(self.model_name)
+        print(f'Predicting {self.model_name}')
         dic = ''
-        with open(join(self.training_info_dir, "permutations.txt"), 'r') as f:
+        with open(join(self.model_name, "permutations.txt"), 'r') as f:
             for i in f.readlines():
                 dic += i
         self.permutations = eval(dic)
 
-        testing_path = join(self.model_name, "testing")
+        if 'sequential' in self.model_name and 'subs' not in self.model_name:
+            for i, (coords, perm) in enumerate(self.permutations.items()):
+                sub_model = join(self.model_name, "subs", str(i))
+                m = ModelTraining(sub_model, self.subinput_shape, self.n_classes, {coords: perm},
+                                  'single',
+                                  self.classes_names, m_id=i)
+                m.predict(x_test, y_test)
+        self.model = load_model(self.model_name)
+        # history = np.load(join(self.training_info_dir, "history.npy"), allow_pickle=True).item()
+        testing_path = join(self.model_name, testing_dir_name)
         pathlib.Path(testing_path).mkdir(exist_ok=True, parents=True)
 
         test_gen = self.get_perm_images_generator(x_test, y_test, augmented=False, debug=False, batch_size=len(x_test),
                                                   shuffle=False)
-        x_data, _ = test_gen.next()
-        prediction = self.model.predict(x_data)
+        x_test, y_test = test_gen.next()
+        prediction = self.model.predict(x_test)
 
         actual_classes = np.argmax(y_test, axis=1)
         predicted_classes = np.argmax(prediction, axis=1)
-
+        plt.ion()
         pp_matrix_from_data(actual_classes, predicted_classes, columns=self.classes_names)
-        cr = classification_report(actual_classes, predicted_classes)
+        plt.savefig(join(testing_path, 'conf_matrix.png'))
+        plt.close('all')
+        plt.ioff()
+        cr = classification_report(actual_classes, predicted_classes, target_names=self.classes_names)
         with open(join(testing_path, "classification_scores"), 'w') as f:
             print(cr, file=f)
         return accuracy_score(actual_classes, predicted_classes)
 
     def save_training_info(self, show=False):
+        plt.close('all')
+        plt.ioff()
         history = self.model.history
-        plt.clf()
         metrics = set([m.replace('val_', '') for m in history.history.keys()])
         for met in metrics:
             plt.plot(history.history[met])
@@ -186,29 +210,32 @@ class ModelTraining:
             if show:
                 plt.show()
             plt.clf()
+        np.save(join(self.training_info_dir, "history.npy"), history.history)
         with open(join(self.training_info_dir, "model_config"), 'w') as f:
             pprint(self.model.get_config(), f)
 
 
 class TrainingSequential(ModelTraining):
-    def __init__(self, model_name, subinput_shape, n_classes, architecture, permutations, classes_names):
-        super().__init__(model_name, subinput_shape, n_classes, architecture, permutations, 'sequential', classes_names)
+    def __init__(self, model_name, subinput_shape, n_classes, permutations, classes_names):
+        super().__init__(model_name, subinput_shape, n_classes, permutations, 'sequential', classes_names)
         self.sub_models = []
 
     def fit(self, x_train, y_train, x_val, y_val):
-        self.set_up()
-        train_ds = self.get_perm_images_generator(x_train, y_train, batch_size=self.batch_size,
+        train_ds = self.get_perm_images_generator(x_train, y_train, batch_size=batch_size,
                                                   augmented=self.augmented, debug=True,
                                                   ind=len(x_train))
-        valid_ds = self.get_perm_images_generator(x_val, y_val, batch_size=self.batch_size,
+        valid_ds = self.get_perm_images_generator(x_val, y_val, batch_size=batch_size,
                                                   augmented=False, debug=True,
                                                   ind=len(x_val))
+        with open(join(self.model_name, "permutations.txt"), 'w') as f:
+            f.write(str(self.permutations).replace('array', 'np.array'))
+
         for i, (coords, perm) in enumerate(self.permutations.items()):
             sub_model = join(self.model_name, "subs", str(i))
             self.sub_models.append(sub_model)
-            m = ModelTraining(sub_model, self.subinput_shape, self.n_classes, self.architecture_id, {coords: perm},
+            m = ModelTraining(sub_model, self.subinput_shape, self.n_classes, {coords: perm},
                               'single',
-                              self.classes_names)
+                              self.classes_names, m_id=i)
             m.fit(x_train, y_train, x_val, y_val)
 
         models = [load_model(m_p) for m_p in self.sub_models]
@@ -217,18 +244,20 @@ class TrainingSequential(ModelTraining):
         _ins = [Input(shape=self.subinput_shape) for _ in models]
         outs = [m(_in) for m, _in in zip(models, _ins)]
         self.model = self.model_factory.get_aggregating_model(_ins, outs, name='sequential')
-        self.model.compile(**self.compile_opts())
+        self.model.compile(**compile_opts())
 
         try:
-            self.model.fit(train_ds, epochs=self.epochs, verbose=1, validation_data=valid_ds,
-                           steps_per_epoch=len(x_train) // self.batch_size,
-                           validation_steps=len(x_val) // self.batch_size,
+            self.model.fit(train_ds, epochs=epochs, verbose=1, validation_data=valid_ds,
+                           steps_per_epoch=len(x_train) // batch_size,
+                           validation_steps=len(x_val) // batch_size,
                            callbacks=self.callbacks())
         except KeyboardInterrupt:
             print("\nInterrupted!")
+            self.model.load_weights(join(self.checkpoints_dir, 'weights.h5'))
         print(f"Saving model {self.model_name}")
         self.model.save(self.model_name)
         self.save_training_info(show=False)
+        print('Model saved')
         return self.model
 
 
@@ -249,17 +278,11 @@ class PlotProgress(Callback):
         self.axs = None
         self.f = None
         self.metrics = None
-        self.i_dir = join(i_dir, 'progress')
+        self.i_dir = i_dir
         pathlib.Path(self.i_dir).mkdir(exist_ok=True, parents=True)
         self.first_epoch = True
-
-    def on_train_begin(self, logs=None):
-        plt.ion()
         self.metrics = {}
-
-    def on_train_end(self, logs=None):
-        self.f.savefig(f"{self.i_dir}/metrics")
-        plt.close(self.f)
+        plt.ion()
 
     def on_epoch_end(self, epoch, logs=None):
         if logs is None:
@@ -269,12 +292,13 @@ class PlotProgress(Callback):
                 self.metrics[metric].append(logs.get(metric))
             else:
                 self.metrics[metric] = [logs.get(metric)]
-        n_met = len(logs)
+        n_met = len([x for x in logs if 'val' not in x])
         if self.f is None:
-            # if n_met > 4:
-            #     self.f, self.axs = plt.subplots(2, 3, figsize=(40, 20))
-            # else:
-            self.f, self.axs = plt.subplots(1, 3, figsize=(15, 5))
+            if n_met > 3:
+                self.f, self.axs = plt.subplots(2, 3, figsize=(12, 8))
+            else:
+                self.f, self.axs = plt.subplots(1, 3, figsize=(12, 4))
+
         acc = max(self.max_acc, round(logs.get("accuracy"), 4))
         val_acc = max(self.max_val_acc, round(logs.get("val_accuracy"), 4))
         loss = min(self.min_loss, round(logs.get("loss"), 4))
@@ -313,8 +337,10 @@ class PlotProgress(Callback):
                         color='orange', )
                 if metric == 'accuracy':
                     ax.set_title(acc_msg)
+                    ax.set_ylim([0.0, 1.0])
                 elif metric == 'loss':
                     ax.set_title(loss_msg)
+                    ax.set_ylim([0.0, 3.0])
             if self.first_epoch:
                 ax.legend()
                 ax.grid()
@@ -322,7 +348,4 @@ class PlotProgress(Callback):
         plt.tight_layout()
         self.f.canvas.draw()
         self.f.canvas.flush_events()
-        self.f.savefig(f"{self.i_dir}/progress_{epoch + 1}.png")
-        # if self.verbose:
-        #     print(acc_msg)
-        #     print(loss_msg)
+        self.f.savefig(f"{self.i_dir}/progress.png")
