@@ -16,7 +16,8 @@ def permute(arr, perm):
     res = np.zeros(arr.shape)
     for c in range(arr.shape[-1]):
         channel = arr[:, :, c]
-        res[:, :, c] = channel.ravel()[perm].reshape(channel.shape)
+        p = perm[c]
+        res[:, :, c] = channel.ravel()[p].reshape(channel.shape)
     return res
 
 
@@ -41,7 +42,7 @@ def resize_img(img, scale):
 
 class PermutationGenerator(tf.keras.utils.Sequence):
     def __init__(self, X, Y, augmenter: ImageDataGenerator, subinput_shape,
-                 shuffle_dataset=True, batch_size=128, permutations=None, debug_path=None):
+                 shuffle_dataset=True, batch_size=None, permutations=None, debug_path=None):
         self.Y = Y.copy()
         self.X = X.copy()
         self.n = len(X)
@@ -54,43 +55,45 @@ class PermutationGenerator(tf.keras.utils.Sequence):
         self.n_frames = len(permutations)
         self.debug_path = debug_path
 
-    def run_debug(self, index):
+    def run_debug(self):
         scale = 20
+        max_imgs = 16
         if self.debug_path is None:
             return
-        x = self.X[index]
-        y = self.Y[index]
+        xb, yb = self.gen.next()
         sr, sc, channels = self.subinput_shape
+        for index, x in enumerate(xb):
+            x = (x * 255).astype(np.uint8)
 
-        subimages = self.generate_frames(np.array([x]))
-        if channels == 1:
-            x = cv2.cvtColor(x, cv2.COLOR_GRAY2RGB)
-        imgs = []
-        x = resize_img(x, scale=scale)
-        for i, ((row, col), subimg) in enumerate(zip(self.permutations, subimages)):
-            if int(row) == row and int(col) == col:
-                color = (0, 255, 0)
-                width = 2
-            elif int(row) == row or int(col) == col:
-                color = (0, 0, 255)
-                width = 5
-            else:
-                color = (255, 0, 0)
-                width = 7
-            x = cv2.rectangle(x,
-                              (int(row * sr) * scale, int(col * sc) * scale),
-                              (int((row + 1) * sr * scale), int((col + 1) * sc) * scale),
-                              color, width)
-            subimg = subimg[0, ...].astype('uint8')
+            subimages = self.generate_frames(np.array([x]))
             if channels == 1:
-                subimg = cv2.cvtColor(subimg, cv2.COLOR_GRAY2RGB)
-            subimg = resize_img(subimg, scale=scale)
-            padded = pad(subimg, x.shape)
-            res = np.hstack((x, padded))
-            imgs.append(res)
-        gif_path = join(self.debug_path, f'frames_{index}.gif')
-        imageio.mimsave(gif_path, imgs, fps=55, duration=0.5)
-        # os.system(f'xdg-open {gif_path}')
+                x = cv2.cvtColor(x, cv2.COLOR_GRAY2RGB)
+            imgs = []
+            x = resize_img(x, scale=scale)
+            for i, ((row, col), subimg) in enumerate(zip(self.permutations, subimages)):
+                if int(row) == row and int(col) == col:
+                    color = (0, 255, 0)
+                    width = 2
+                elif int(row) == row or int(col) == col:
+                    color = (0, 0, 255)
+                    width = 5
+                else:
+                    color = (255, 0, 0)
+                    width = 7
+                x = cv2.rectangle(x,
+                                  (int(row * sr) * scale, int(col * sc) * scale),
+                                  (int((row + 1) * sr * scale), int((col + 1) * sc) * scale),
+                                  color, width)
+                subimg = subimg[0, ...].astype('uint8')
+                if channels == 1:
+                    subimg = cv2.cvtColor(subimg, cv2.COLOR_GRAY2RGB)
+                subimg = resize_img(subimg, scale=scale)
+                padded = pad(subimg, x.shape)
+                res = np.hstack((x, padded))
+                imgs.append(res)
+            gif_path = join(self.debug_path, f'frames_{index}.gif')
+            imageio.mimsave(gif_path, imgs, fps=55, duration=0.5)
+            # os.system(f'xdg-open {gif_path}')
 
     def next(self):
         x, y = self.gen.next()
@@ -169,8 +172,8 @@ def load_data(dataset):
         x_test, y_test = convert_ds_to_numpy(testDataset)
         return to_categorical_n_classes(x_train, y_train, x_test, y_test)
     elif dataset == 'cats_vs_dogs':
-        HEIGHT = 200
-        WIDTH = 200
+        HEIGHT = 100
+        WIDTH = 100
 
         def preprocess(img, label):
             return tf.cast(tf.image.resize(img, [HEIGHT, WIDTH]), tf.uint8), tf.cast(label, tf.float32)
@@ -198,7 +201,7 @@ def load_data(dataset):
 def get_classes_names_for_dataset(ds_name):
     classes = None
     if ds_name == 'mnist':
-        classes = [i for i in range(10)]
+        classes = [str(i) for i in range(10)]
     elif ds_name == 'fashion_mnist':
         classes = ['T-shirt/top', 'Trouser', 'Pullover', 'Dress', 'Coat', 'Sandal', 'Shirt', 'Sneaker', 'Bag',
                    'Ankle boot']

@@ -6,11 +6,64 @@ from scipy.stats import ttest_rel
 from sklearn.model_selection import StratifiedKFold
 from tensorflow.python.client import device_lib
 
+from enums import Aggregation
 from training import ModelTraining, TrainingSequential
 from permutations import generate_permutations, Overlap
 from preprocessing import load_data, get_classes_names_for_dataset
 
 print(device_lib.list_local_devices())
+exp_id = 20
+# lab = True
+lab = False
+#
+if lab:
+    datasets = [
+        'cifar10',
+        'fashion_mnist',
+        'emnist-letters',
+        'mnist'
+    ]
+else:
+    datasets = [
+        # 'mnist',
+        'fashion_mnist',
+        'emnist-letters',
+        # 'cifar10',
+        # 'kmnist',
+        # 'eurosat',
+        # 'cats_vs_dogs'
+    ]
+
+models = [
+    {
+        'type': 'sequential',
+        'seed': 34567,
+        'grid_size': (2, 2),
+        'overlap': Overlap.CENTER.value,
+        'aggregation': Aggregation.CONCATENATE.value
+    },
+    {
+        'type': 'parallel',
+        'seed': 34567,
+        'grid_size': (2, 2),
+        'overlap': Overlap.CENTER.value,
+        'aggregation': Aggregation.CONCATENATE.value
+    },
+    {
+        'type': 'sequential',
+        'seed': None,
+        'grid_size': (2, 2),
+        'overlap': Overlap.CENTER.value,
+        'aggregation': Aggregation.CONCATENATE.value
+    },
+    {
+        'type': 'parallel',
+        'seed': None,
+        'grid_size': (2, 2),
+        'overlap': Overlap.CENTER.value,
+        'aggregation': Aggregation.CONCATENATE.value
+    },
+]
 
 
 def get_training_env(model_params, ds_name, f_id, n_classes, input_shape):
@@ -18,19 +71,21 @@ def get_training_env(model_params, ds_name, f_id, n_classes, input_shape):
     grid_size = model_params['grid_size']
     seed = model_params['seed']
     overlap = model_params['overlap']
+    aggr = model_params['aggregation']
 
     subinput_shape = (input_shape[0] // grid_size[0], input_shape[1] // grid_size[1], input_shape[2])
     permutations = generate_permutations(seed, grid_size, subinput_shape, overlap)
 
-    model_name = f"models/{model_type}-{ds_name}-fold_{f_id}-{grid_size[0]}x{grid_size[1]}-"
-    model_name += f"-{overlap}"
+    model_name = f"models/v{exp_id}/{model_type}-{ds_name}-fold_{f_id}-{grid_size[0]}x{grid_size[1]}"
     model_name += f"{'-permuted' if seed is not None else '-identity'}"
+    model_name += f"-{overlap}"
+    model_name += f"-{aggr}"
 
     classes = get_classes_names_for_dataset(ds_name)
     if model_type == 'parallel':
-        return ModelTraining(model_name, subinput_shape, n_classes, permutations, 'parallel', classes)
+        return ModelTraining(model_name, subinput_shape, n_classes, permutations, 'parallel', classes, aggr)
     elif model_type == 'sequential':
-        return TrainingSequential(model_name, subinput_shape, n_classes, permutations, classes)
+        return TrainingSequential(model_name, subinput_shape, n_classes, permutations, classes, aggr)
 
 
 class Experiment:
@@ -38,7 +93,7 @@ class Experiment:
 
     def __init__(self):
         self.models = None
-        self.skf = StratifiedKFold(n_splits=self.n_splits)
+        self.skf = StratifiedKFold(n_splits=self.n_splits, shuffle=True, random_state=42)
         self.datasets = None
         self.scores = None
 
@@ -70,10 +125,10 @@ class Experiment:
             for i in range(n_models):
                 for j in range(n_models):
                     t_statistic[i, j], p_value[i, j] = ttest_rel(ds_scores[i], ds_scores[j])
-            np.save('t_stat.npy', t_statistic)
+            np.save(f't_stat{exp_id}.npy', t_statistic)
             print(f'{t_statistic=}')
             print(f'{p_value=}')
-            np.save('p_stat.npy', p_value)
+            np.save(f'p_stat{exp_id}.npy', p_value)
             advantage = np.zeros((n_models, n_models))
             advantage[t_statistic > 0] = 1
             significance = np.zeros((n_models, n_models))
@@ -83,39 +138,4 @@ class Experiment:
 
 
 if __name__ == '__main__':
-    models = [
-        {
-            'type': 'sequential',
-            'seed': 123,
-            'grid_size': (2, 2),
-            'overlap': Overlap.CENTER.value,
-        },
-        {
-            'type': 'parallel',
-            'seed': 123,
-            'grid_size': (2, 2),
-            'overlap': Overlap.CENTER.value,
-        },
-        {
-            'type': 'sequential',
-            'seed': None,
-            'grid_size': (2, 2),
-            'overlap': Overlap.CENTER.value,
-        },
-        {
-            'type': 'parallel',
-            'seed': None,
-            'grid_size': (2, 2),
-            'overlap': Overlap.CENTER.value,
-        },
-    ]
-    datasets = [
-        # 'mnist',
-        'fashion_mnist',
-        # 'cifar10',
-        # 'kmnist',
-        # 'emnist-letters',
-        # 'eurosat',
-        # 'cats_vs_dogs'
-    ]
-    Experiment().fit_models_and_save_scores(models, datasets, 'scores.npy')
+    Experiment().fit_models_and_save_scores(models, datasets, f'scores{exp_id}.npy')
