@@ -1,4 +1,5 @@
 import pathlib
+import shutil
 import sys
 from os.path import join, exists
 from pprint import pprint
@@ -18,9 +19,11 @@ from tensorflow.keras.metrics import Precision, Recall
 from tensorflow.keras.models import load_model
 from tensorflow.keras.optimizers import Adam, SGD
 from tensorflow.keras.preprocessing.image import ImageDataGenerator
+from sklearn.ensemble import RandomForestClassifier
 
+from enums import Aggregation
 from model import ModelFactory
-from preprocessing import PermutationGenerator
+from permutations import PermutationGenerator
 
 info_dir_name = "train"
 debug_dir_name = 'data_examples'
@@ -34,8 +37,14 @@ lr_patience = 5
 lr = 3e-4
 
 
-# lr = 1e-3
-# lr = 1e-3
+# lr = 1e-2
+
+
+def scheduler(epoch, rate):
+    if epoch < 10:
+        return rate
+    else:
+        return rate * tf.math.exp(-0.05)
 
 
 def compile_opts():
@@ -57,19 +66,18 @@ def apply_flip(model_name):
 def get_aug(model_name):
     if 'cifar' in model_name:
         return {
-            "rescale": 1 / 255,
-            "width_shift_range": 0.08,  # randomly shift images horizontally (fraction of total width)
-            "height_shift_range": 0.08,  # randomly shift images vertically (fraction of total height)
-            "rotation_range": 8,
+            # "rescale": 1 / 255,
+            "width_shift_range": 0.05,  # randomly shift images horizontally (fraction of total width)
+            "height_shift_range": 0.05,  # randomly shift images vertically (fraction of total height)
+            # "rotation_range": 5,
             # "sheer_range": 3,
             "horizontal_flip": apply_flip(model_name)
         }
     return {
-        "rescale": 1 / 255,
-        "width_shift_range": 0.05,  # randomly shift images horizontally (fraction of total width)
-        "height_shift_range": 0.05,  # randomly shift images vertically (fraction of total height)
-        "rotation_range": 5,
-        # "sheer_range": 3,
+        # "rescale": 1 / 255,
+        "width_shift_range": 0.02,  # randomly shift images horizontally (fraction of total width)
+        "height_shift_range": 0.02,  # randomly shift images vertically (fraction of total height)
+        # "rotation_range": 5,
         "horizontal_flip": apply_flip(model_name)
     }
 
@@ -97,7 +105,6 @@ class ModelTraining:
         self.model_factory = None
         self.subinput_shape = subinput_shape
         self.m_id = m_id
-        self.set_up()
 
         print(f"Model name: {self.model_name}")
 
@@ -117,7 +124,7 @@ class ModelTraining:
     def get_perm_images_generator(self, x, y, augmented, debug=False, bs=None, shuffle=True):
         aug = ImageDataGenerator(
             **get_aug(self.model_name)
-        ) if augmented else ImageDataGenerator(rescale=1. / 255)
+        ) if augmented else ImageDataGenerator()
         gen = PermutationGenerator(x, y, aug, self.subinput_shape, permutations=self.permutations,
                                    batch_size=bs, debug_path=self.debug_info_dir, shuffle_dataset=shuffle)
         if debug:
@@ -131,12 +138,15 @@ class ModelTraining:
         self.checkpoints_dir = join(self.model_name, 'checkpoint')
 
         pathlib.Path(self.debug_info_dir).mkdir(exist_ok=True, parents=True)
+        if exists(self.arch_info_dir):
+            shutil.rmtree(self.arch_info_dir)
         pathlib.Path(self.arch_info_dir).mkdir(exist_ok=True, parents=True)
         pathlib.Path(self.checkpoints_dir).mkdir(exist_ok=True, parents=True)
         self.model_factory = ModelFactory(self.arch_info_dir, self.n_classes, len(self.permutations),
                                           self.subinput_shape, self.aggr)
 
     def fit(self, x_train, y_train, x_val, y_val):
+        self.set_up()
         if exists(join(self.model_name, 'saved_model.pb')):
             print("Model already trained, skipping")
             return
@@ -228,12 +238,17 @@ class ModelTraining:
             pprint(self.model.get_config(), f)
 
 
+########################################################################################################################
+########################################################################################################################
+########################################################################################################################
+
 class TrainingSequential(ModelTraining):
     def __init__(self, model_name, subinput_shape, n_classes, permutations, classes_names, aggr):
         super().__init__(model_name, subinput_shape, n_classes, permutations, 'sequential', classes_names, aggr)
         self.sub_models = []
 
     def fit(self, x_train, y_train, x_val, y_val):
+        self.set_up()
         train_ds = self.get_perm_images_generator(x_train, y_train, bs=batch_size,
                                                   augmented=self.augmented, debug=True, )
         valid_ds = self.get_perm_images_generator(x_val, y_val, bs=batch_size,
@@ -251,32 +266,78 @@ class TrainingSequential(ModelTraining):
                               self.classes_names, aggr=None, m_id=i)
             m.fit(x_train, y_train, x_val, y_val)
         # self.sub_models = reversed(self.sub_models)  #
-        models = []
-        for m_p in self.sub_models:
-            m = load_model(m_p)
-            model = Model(inputs=m.input, outputs=m.layers[-2].output, name=m.name)
-            model.trainable = False
-            models.append(model)
-        # models = [load_model(m_p) for m_p in self.sub_models]
 
-        _ins = [Input(shape=self.subinput_shape) for _ in models]
-        outs = [m(_in) for m, _in in zip(models, _ins)]
-        self.model = self.model_factory.get_aggregating_model(_ins, outs, model_name='sequential')
-        self.model.compile(**compile_opts())
+        run_dense = True
+        if run_dense:
+            models = []
+            for m_p in self.sub_models:
+                m = load_model(m_p)
+                # model = Model(inputs=m.input, outputs=m.layers[-2].output, name=m.name)
+                if self.aggr == Aggregation.CONCAT_STRIP.value:
+                    # model = m
+                    model = Model(inputs=m.input, outputs=m.layers[-2].output, name=m.name)
+                else:
+                    model = m
+                model.trainable = False
+                models.append(model)
+            _ins = [Input(shape=self.subinput_shape) for _ in models]
+            outs = [m(_in) for m, _in in zip(models, _ins)]
+            self.model = self.model_factory.get_aggregating_model(_ins, outs, model_name='sequential')
+            self.model.compile(**compile_opts())
 
-        try:
-            self.model.fit(train_ds, epochs=epochs, verbose=1, validation_data=valid_ds,
-                           steps_per_epoch=len(x_train) // batch_size,
-                           validation_steps=len(x_val) // batch_size,
-                           callbacks=self.callbacks())
-        except KeyboardInterrupt:
-            print("\nInterrupted!")
-            self.model.load_weights(join(self.checkpoints_dir, 'weights.h5'))
-        print(f"Saving model {self.model_name}")
-        self.model.save(self.model_name)
-        self.save_training_info()
-        print('Model saved')
-        return self.model
+            try:
+                self.model.fit(train_ds, epochs=epochs, verbose=1, validation_data=valid_ds,
+                               steps_per_epoch=len(x_train) // batch_size,
+                               validation_steps=len(x_val) // batch_size,
+                               callbacks=self.callbacks())
+            except KeyboardInterrupt:
+                print("\nInterrupted!")
+                self.model.load_weights(join(self.checkpoints_dir, 'weights.h5'))
+            print(f"Saving model {self.model_name}")
+            self.model.save(self.model_name)
+            self.save_training_info()
+            print('Model saved')
+            return self.model
+        else:
+            ensemble_train = []
+            ensemble_val = []
+            models = []
+            train_gens = []
+            valid_gens = []
+            for i, (coords, perm) in perms:
+                sub_model = join(self.model_name, "subs", str(i))
+                m = ModelTraining(sub_model, self.subinput_shape, self.n_classes, {coords: perm},
+                                  'single',
+                                  self.classes_names, aggr=None, m_id=i)
+                train_gen = m.get_perm_images_generator(x_train, y_train, shuffle=False, bs=len(x_train),
+                                                        augmented=True)
+                val_gen = m.get_perm_images_generator(x_val, y_val, shuffle=False, bs=len(x_val), augmented=False)
+                model = load_model(sub_model)
+                models.append(model)
+                train_gens.append(train_gen)
+                valid_gens.append(val_gen)
+            ensemble_train = np.zeros((len(x_train), len(models), model.layers[-2].output.shape[-1]))
+            ensemble_valid = np.zeros((len(x_val), len(models), model.layers[-2].output.shape[-1]))
+
+            for i, (m, tg, vg) in enumerate(zip(models, train_gens, valid_gens)):
+                ensemble_train[:, i, :]
+
+            clf = RandomForestClassifier()
+            clf.fit(ensemble_train, y_train)
+            prediction = clf.predict(ensemble_val)
+            actual_classes = np.argmax(y_val, axis=1)
+            predicted_classes = np.argmax(prediction, axis=1)
+            testing_path = join(self.model_name, testing_dir_name)
+            pathlib.Path(testing_path).mkdir(exist_ok=True, parents=True)
+            plt.ion()
+            pp_matrix_from_data(actual_classes, predicted_classes, columns=self.classes_names)
+            plt.savefig(join(testing_path, 'conf_matrix_val.png'))
+            plt.close('all')
+            plt.ioff()
+            cr = classification_report(actual_classes, predicted_classes, target_names=self.classes_names)
+            with open(join(testing_path, "classification_scores"), 'w') as f:
+                print(cr, file=f)
+            return accuracy_score(actual_classes, predicted_classes)
 
 
 class PlotProgress(Callback):
