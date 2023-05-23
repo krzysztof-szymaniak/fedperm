@@ -1,4 +1,6 @@
-from keras.datasets import cifar10, fashion_mnist, mnist
+import string
+
+from keras.datasets import cifar10, fashion_mnist, mnist, cifar100
 import numpy as np
 import tensorflow as tf
 import tensorflow_datasets as tfds
@@ -41,17 +43,17 @@ def load_data(dataset):
         (x_train, y_train), (x_test, y_test) = ds.load_data()
         y_train = y_train.ravel()
         y_test = y_test.ravel()
-        return to_categorical_n_classes(x_train, y_train, x_test, y_test, subtract_pixel_mean=dataset == 'cifar10')
+        return to_categorical_n_classes(x_train, y_train, x_test, y_test, subtract_pixel_mean=False)
     if dataset == 'emnist-letters':
         dataset = dataset.replace('-', '/')
 
         def transpose(x):
             return tf.image.flip_left_right(tf.image.rot90(x, -1))
 
-        trainDataset = tfds.load(name=dataset, split='train', as_supervised=True).map(
-            lambda x, y: (transpose(x), y - 1))
-        testDataset = tfds.load(name=dataset, split='test', as_supervised=True).map(
-            lambda x, y: (transpose(x), y - 1))
+        split = ['train[:85%]', 'train[85%:]']
+        trainDataset, testDataset = tfds.load(name=dataset, split=split, as_supervised=True)
+        trainDataset = trainDataset.map(lambda x, y: (transpose(x), y - 1))
+        testDataset = testDataset.map(lambda x, y: (transpose(x), y - 1))
         x_train, y_train = convert_ds_to_numpy(trainDataset)
         x_test, y_test = convert_ds_to_numpy(testDataset)
         return to_categorical_n_classes(x_train, y_train, x_test, y_test)
@@ -61,10 +63,10 @@ def load_data(dataset):
         trainDataset, testDataset = tfds.load(name=dataset, split=split, as_supervised=True)
         x_train, y_train = convert_ds_to_numpy(trainDataset)
         x_test, y_test = convert_ds_to_numpy(testDataset)
-        return to_categorical_n_classes(x_train, y_train, x_test, y_test, subtract_pixel_mean=True)
+        return to_categorical_n_classes(x_train, y_train, x_test, y_test, subtract_pixel_mean=False)
     elif dataset == 'cats_vs_dogs':
-        HEIGHT = 100
-        WIDTH = 100
+        HEIGHT = 128
+        WIDTH = 128
 
         def preprocess(img, label):
             return tf.cast(tf.image.resize(img, [HEIGHT, WIDTH]), tf.uint8), tf.cast(label, tf.float32)
@@ -100,6 +102,8 @@ def get_classes_names_for_dataset(ds_name):
         classes = ['airplane', 'automobile', 'bird', 'cat', 'deer', 'dog', 'frog', 'horse', 'ship', 'truck']
     elif ds_name == 'cats_vs_dogs':
         classes = ['cat', 'dog']
+    elif ds_name == 'emnist-letters':
+        classes = list(string.ascii_lowercase)
     return classes
 
 

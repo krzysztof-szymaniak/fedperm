@@ -6,76 +6,73 @@ import numpy as np
 from scipy.stats import ttest_rel
 from sklearn.model_selection import StratifiedKFold
 
-from enums import Aggregation, PermSchemas
+from enums import Aggregation, PermSchemas, ModelType
 from training import ModelTraining, TrainingSequential
 from permutations import generate_permutations, Overlap
 from preprocessing import load_data, get_classes_names_for_dataset
 
 from tensorflow.python.client import device_lib
+
 print(device_lib.list_local_devices())
-exp_id = 103
-# with open('id.txt', 'r') as f:
-#     exp_id = int(f.read())
-# # exp_id += 1
-# with open('id.txt', 'w') as f:
-#     f.write(str(exp_id))
-# # exp_id = 73
+exp_id = "8-bs"
+
+# if lab:
+datasets = [
+    'cifar10',
+    'cifar100',
+    # 'fashion_mnist',
+    # 'emnist-letters',
+    # 'cats_vs_dogs',
+    # 'mnist',
+    # 'eurosat',
+]
+models = [
+    {
+        'type': 'sequential',
+        'seed': 1234,
+        # 'seed': None,
+        'grid_size': (2, 2),
+        'overlap': Overlap.CROSS,
+        'aggregation': Aggregation.CONCATENATE,
+        'permutation_scheme': PermSchemas.BS_4_3,
+        'model_architecture': ModelType.CONV_MIXER,
+    },
+    {
+        'type': 'parallel',
+        'seed': 1234,
+        'grid_size': (2, 2),
+        'overlap': Overlap.FULL,
+        'aggregation': Aggregation.CONCATENATE,
+        'permutation_scheme': PermSchemas.BS_4_3,
+        'model_architecture': ModelType.CONV_MIXER,
+
+    },
+    {
+        'type': 'sequential',
+        'seed': None,
+        'grid_size': (2, 2),
+        'overlap': Overlap.CROSS,
+        'aggregation': Aggregation.CONCATENATE,
+        'model_architecture': ModelType.VGG,
+
+    },
+    {
+        'type': 'parallel',
+        'seed': None,
+        'grid_size': (2, 2),
+        'overlap': Overlap.CENTER.value,
+        'aggregation': Aggregation.CONCATENATE.value,
+        'model_architecture': ModelType.VGG,
+    },
+]
 
 print(f'{exp_id=}')
 
 lab = os.path.exists('lab')
 lab = True
 
-if lab:
-    datasets = [
-        'cifar10',
-        'fashion_mnist',
-        'emnist-letters',
-        'mnist'
-    ]
-else:
-    datasets = [
-        # 'mnist',
-        'fashion_mnist',
-        # 'emnist-letters',
-        # 'cifar10',
-        # 'kmnist',
-        # 'eurosat',
-        # 'cats_vs_dogs'
-    ]
-
-models = [
-    {
-        'type': 'sequential',
-        'seed': 42,
-        'grid_size': (2, 2),
-        'overlap': Overlap.FULL.value,
-        'aggregation': Aggregation.CONCAT_STRIP.value,
-        'permutation_scheme': PermSchemas.WHOLE,
-    },
-    {
-        'type': 'parallel',
-        'seed': 42,
-        'grid_size': (2, 2),
-        'overlap': Overlap.FULL.value,
-        'aggregation': Aggregation.CONCATENATE.value,
-        'permutation_scheme': PermSchemas.WHOLE,
-    },
-    {
-        'type': 'sequential',
-        'seed': None,
-        'grid_size': (2, 2),
-        'overlap': Overlap.CROSS.value,
-        'aggregation': Aggregation.CONCAT_STRIP.value
-    },
-    {
-        'type': 'parallel',
-        'seed': None,
-        'grid_size': (2, 2),
-        'overlap': Overlap.CROSS.value,
-        'aggregation': Aggregation.CONCATENATE.value
-    },
-]
+run_faulty_test = True
+run_from_saved_models = False
 
 
 def get_training_env(model_params, ds_name, f_id, n_classes, input_shape):
@@ -85,19 +82,22 @@ def get_training_env(model_params, ds_name, f_id, n_classes, input_shape):
     overlap = model_params['overlap']
     aggr = model_params['aggregation']
     scheme = model_params.get('permutation_scheme')
+    arch = model_params.get('model_architecture')
 
     subinput_shape = (input_shape[0] // grid_size[0], input_shape[1] // grid_size[1], input_shape[2])
     permutations = generate_permutations(seed, grid_size, subinput_shape, overlap, scheme)
 
-    model_name = f"models/v{exp_id}/{ds_name}/{model_type}/{scheme.name.lower() + '-' if scheme else ''}" \
-                 f"{'permuted' if seed is not None else 'identity'}/" \
-                 f"overlap_{overlap}-aggr_{aggr}-{grid_size[0]}x{grid_size[1]}/fold_{f_id}"
+    model_name = f"{'models' if not run_from_saved_models else 'saved'}/v{exp_id}/{ds_name}/{model_type}/" \
+                 f"{arch.value}/" \
+                 f"{'perm-' if seed is not None else 'identity'}" \
+                 f"{scheme.name.lower() if scheme and seed else ''}/" \
+                 f"ov_{overlap.name.lower()}-agg_{aggr.name.lower()}-{grid_size[0]}x{grid_size[1]}/fold_{f_id}"
 
     classes = get_classes_names_for_dataset(ds_name)
     if model_type == 'parallel':
-        return ModelTraining(model_name, subinput_shape, n_classes, permutations, 'parallel', classes, aggr)
+        return ModelTraining(model_name, subinput_shape, n_classes, permutations, 'parallel', classes, aggr.value, arch.value)
     elif model_type == 'sequential':
-        return TrainingSequential(model_name, subinput_shape, n_classes, permutations, classes, aggr)
+        return TrainingSequential(model_name, subinput_shape, n_classes, permutations, classes, aggr.value, arch.value)
 
 
 class Experiment:
@@ -124,6 +124,15 @@ class Experiment:
                         model.fit(x[train], y[train], x[valid], y[valid])
                     else:
                         print(f"Skipping training {model.model_name}")
+                    if run_faulty_test:
+                        print("Running test with faulty data")
+                        invalid_test_config = {
+                            'seed': 11111,
+                            'overlap': m['overlap'],
+                            'grid': m['grid_size'],
+                            'scheme': m['permutation_scheme']
+                        }
+                        model.predict(x_test, y_test, invalid_test=invalid_test_config, test_dir_name='test_wrong_seed')
                     self.scores[d_id, m_id, f_id] = model.predict(x_test, y_test)
         np.save(scores_file, self.scores)
         self.run_stats(scores_file)
