@@ -7,7 +7,7 @@ from tensorflow.keras.layers import Dense, Dropout, Embedding, Add, LayerNormali
 from tensorflow.keras import Model
 import tensorflow as tf
 
-from utils import save_model_info
+from model.visualisation import plot_model
 
 
 def mlp(x, hidden_units, dropout_rate):
@@ -85,7 +85,7 @@ def transformer_block(prev_layer, num_heads, n_dim, units, bl, m_id, i_dir):
     x3 = mlp(x3, hidden_units=units, dropout_rate=0.1)
     x = Add()([x3, x2])
     m = Model(inputs=_in, outputs=x, name=f'Transformer-Encoder-bl{bl}-m{m_id}')
-    save_model_info(f'{i_dir}/transformer', m, m.name)
+    plot_model(f'{i_dir}/transformer', m, m.name)
     return m(prev_layer)
 
 

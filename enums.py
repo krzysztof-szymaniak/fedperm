@@ -2,17 +2,19 @@ from enum import Enum
 
 
 class Aggregation(Enum):
-    CONCATENATE = 'concat'
+    STRIP_CONCAT = 'strip_concat'
+    CONCAT = 'concat'
     ADD = 'add'
     AVERAGE = 'avg'
 
 
 class Overlap(Enum):  # scheme, base_grid
-    CENTER = ('center', False)
+    CENTER = ('center', True)
     CROSS = ('cross', False)
     EDGES = ('edges', False)
     CORNERS = ('corners', False)
     FULL = ('full', True)
+    NONE = ('none', True)
 
 
 class PermSchemas(Enum):
@@ -27,13 +29,13 @@ class PermSchemas(Enum):
 
 
 class ModelType(Enum):
-    PIXEL_SHUFFLE_VGG = 'ps-vgg'
+    ADAPTATION_VGG = 'ps-vgg'
     VGG = 'vgg'
     RESNET_V1 = 'resnet-v1'
     RESNET_V2 = 'resnet-v2'
-    PIXEL_SHUFFLE_INCEPTION = 'ps-inception'
-    PIXEL_SHUFFLE_RESNET_V1 = 'ps-resnet-v1'
-    PIXEL_SHUFFLE_RESNET_V2 = 'ps-resnet-v2'
+    ADAPTATION_INCEPTION = 'ps-inception'
+    ADAPTATION_RESNET_V1 = 'ps-resnet-v1'
+    ADAPTATION_RESNET_V2 = 'ps-resnet-v2'
     VISION_TRANSFORMER = 'vis-trans'
     CONV_MIXER = 'conv-mixer'
     MLP = 'mlp'

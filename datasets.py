@@ -1,10 +1,10 @@
 import string
 
-from keras.datasets import cifar10, fashion_mnist, mnist, cifar100
+import cv2
 import numpy as np
 import tensorflow as tf
 import tensorflow_datasets as tfds
-
+from keras.datasets import cifar10, fashion_mnist, mnist
 from keras.utils.np_utils import to_categorical
 
 
@@ -14,26 +14,32 @@ def convert_ds_to_numpy(ds):
     return x, y
 
 
-def to_categorical_n_classes(x_train, y_train, x_test, y_test, subtract_pixel_mean=False):
+def to_categorical_n_classes(x_train, y_train, x_test, y_test, upscale=False):
     classes = np.unique(y_train)
     n_classes = len(classes)
     y_train = to_categorical(y_train, num_classes=n_classes)
     y_test = to_categorical(y_test, num_classes=n_classes)
 
-    x_train = x_train.astype('float32') / 255
-    x_test = x_test.astype('float32') / 255
-    if subtract_pixel_mean:
-        x_train_mean = np.mean(x_train, axis=0)
-        x_train -= x_train_mean
-        x_test -= x_train_mean
-
     if len(x_train.shape) == 3:
         x_train = np.expand_dims(x_train, axis=-1)
         x_test = np.expand_dims(x_test, axis=-1)
+
+    if upscale:
+        shape = (64, 64)
+        x_train = np.array([reshape(img, shape) for img in x_train])
+        x_test = np.array([reshape(img, shape) for img in x_test])
+
+    x_train = x_train.astype('float32') / 255
+    x_test = x_test.astype('float32') / 255
     return (x_train, y_train), (x_test, y_test), n_classes
 
 
+def reshape(img, shape):
+    return cv2.resize(img, shape)
+
+
 def load_data(dataset):
+    upscale = dataset in ['mnist', 'fashion_mnist', 'cifar10', 'cifar100', 'emnist-letters']
     if dataset in ['mnist', 'fashion_mnist', 'cifar10']:
         ds = {
             'mnist': mnist,
@@ -43,7 +49,7 @@ def load_data(dataset):
         (x_train, y_train), (x_test, y_test) = ds.load_data()
         y_train = y_train.ravel()
         y_test = y_test.ravel()
-        return to_categorical_n_classes(x_train, y_train, x_test, y_test, subtract_pixel_mean=False)
+        return to_categorical_n_classes(x_train, y_train, x_test, y_test, upscale=upscale)
     if dataset == 'emnist-letters':
         dataset = dataset.replace('-', '/')
 
@@ -56,14 +62,14 @@ def load_data(dataset):
         testDataset = testDataset.map(lambda x, y: (transpose(x), y - 1))
         x_train, y_train = convert_ds_to_numpy(trainDataset)
         x_test, y_test = convert_ds_to_numpy(testDataset)
-        return to_categorical_n_classes(x_train, y_train, x_test, y_test)
+        return to_categorical_n_classes(x_train, y_train, x_test, y_test, upscale=upscale)
 
     elif dataset == 'eurosat':
         split = ['train[:80%]', 'train[80%:]']
         trainDataset, testDataset = tfds.load(name=dataset, split=split, as_supervised=True)
         x_train, y_train = convert_ds_to_numpy(trainDataset)
         x_test, y_test = convert_ds_to_numpy(testDataset)
-        return to_categorical_n_classes(x_train, y_train, x_test, y_test, subtract_pixel_mean=False)
+        return to_categorical_n_classes(x_train, y_train, x_test, y_test)
     elif dataset == 'cats_vs_dogs':
         HEIGHT = 128
         WIDTH = 128
@@ -104,6 +110,8 @@ def get_classes_names_for_dataset(ds_name):
         classes = ['cat', 'dog']
     elif ds_name == 'emnist-letters':
         classes = list(string.ascii_lowercase)
+    elif ds_name == 'cifar100':
+        classes = [str(i) for i in range(100)]
     return classes
 
 

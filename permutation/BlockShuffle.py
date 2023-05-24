@@ -5,7 +5,7 @@ import numpy as np
 
 class BlockScramble:
     def __init__(self, blockSize_filename, seed):
-        if (isinstance(blockSize_filename, str)):
+        if isinstance(blockSize_filename, str):
             self.load(blockSize_filename)
         else:
             self.blockSize = blockSize_filename
@@ -14,7 +14,7 @@ class BlockScramble:
 
     def setKey(self, key):
         self.key = key
-        self.rev = (key > key.size / 2)  # random trues, falses 50/50 rate
+        self.rev = (key > key.size / 2)
         self.invKey = np.argsort(key)
 
     def load(self, filename):

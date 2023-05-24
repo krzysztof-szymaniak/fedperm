@@ -1,38 +1,35 @@
-import math
 import pathlib
-import pickle
-
-import numpy as np
-from sklearn.utils import shuffle
-
-from BlockShuffle import BlockScramble
-from enums import Overlap, PermSchemas
 from os.path import join
 
 import cv2
 import imageio
+import numpy as np
 import tensorflow as tf
 from PIL import Image
-from tensorflow.keras.preprocessing.image import ImageDataGenerator
+from keras_preprocessing.image import ImageDataGenerator
+from sklearn.utils import shuffle
+
+from enums import Overlap, PermSchemas
+from permutation.BlockShuffle import BlockScramble
 
 MAX_SEED = 10000000
 
 
-def cross(r, c, size=None, ctr=None):
-    return (r == ctr[0] - 0.5 and abs(c - ctr[1] - 0.5 <= size)) or (
-            c == ctr[1] - 0.5 and abs(r - ctr[0] - 0.5 <= size))
+def cross(r, c, size=None, cntr=None):
+    return (r == cntr[0] - 0.5 and abs(c - cntr[1] - 0.5 <= size)) or (
+            c == cntr[1] - 0.5 and abs(r - cntr[0] - 0.5 <= size))
 
 
-def center(r, c, radius=None, ctr=None):
-    return np.sqrt((r - ctr[0] + 0.5) ** 2 + (c - ctr[1] + 0.5) ** 2) <= radius
+def center(r, c, radius=None, cntr=None):
+    return np.sqrt((r - cntr[0] + 0.5) ** 2 + (c - cntr[1] + 0.5) ** 2) <= radius
 
 
 def init_keys(seed, grid_shape, overlap_scheme, n_repeats):
-    overlap, base_grid = overlap_scheme.value
+    use_base_grid = overlap_scheme.value[1]
     if seed is not None:
         np.random.seed(seed)
     keys = {}
-    if base_grid:
+    if use_base_grid:
         for r in range(grid_shape[0]):
             for c in range(grid_shape[1]):
                 if (r, c) not in keys:
@@ -44,25 +41,25 @@ def init_keys(seed, grid_shape, overlap_scheme, n_repeats):
                 if (r, c) not in keys and condition(r, c, **kwargs):
                     keys[(r, c)] = [np.random.randint(1, MAX_SEED) for _ in range(n_repeats)]
 
-    if overlap == Overlap.CENTER.value[0]:
-        add_overlap(condition=center, radius=0, ctr=(grid_shape[0] / 2, grid_shape[1] / 2))
+    if overlap_scheme == Overlap.CENTER:
+        add_overlap(condition=center, radius=0.1, cntr=(grid_shape[0] / 2, grid_shape[1] / 2))
 
-    elif overlap == Overlap.CROSS.value[0]:
-        add_overlap(condition=cross, size=grid_shape[0] // 2, ctr=(grid_shape[0] / 2, grid_shape[1] / 2))
+    elif overlap_scheme == Overlap.CROSS:
+        add_overlap(condition=cross, size=grid_shape[0] // 2, cntr=(grid_shape[0] / 2, grid_shape[1] / 2))
 
-    elif overlap == Overlap.EDGES.value[0]:
+    elif overlap_scheme == Overlap.EDGES:
         add_overlap(condition=lambda r, c: (int(r) != r and int(c) == c) or (int(r) == r and int(c) != c))
 
-    elif overlap == Overlap.CORNERS.value[0]:
+    elif overlap_scheme == Overlap.CORNERS:
         add_overlap(condition=lambda r, c: int(r) != r and int(c) != c)
 
-    elif overlap == Overlap.FULL.value[0]:
+    elif overlap_scheme == Overlap.FULL:
         add_overlap(condition=lambda r, c: True)
 
     else:  # no overlap
         pass
     np.random.seed()  # restore randomness
-    if seed is None:  # identity mode
+    if seed is None:  # identity mode does not use seeds
         for key in keys:
             keys[key] = None
     return keys
@@ -92,9 +89,95 @@ def generate_permutations(seed, grid_shape, subinput_shape, overlap, scheme):
     return permutations
 
 
+class PermutationGenerator(tf.keras.utils.Sequence):
+    def __init__(self, X, Y, augmenter, subinput_shape, shuffle_dataset=True, batch_size=None, permutations=None,
+                 examples_path=None):
+        self.Y = Y.copy()
+        self.X = X.copy()
+        self.n = len(X)
+        self.gen = augmenter.flow(self.X, self.Y, batch_size=batch_size, shuffle=shuffle_dataset)
+        self.n_frames = len(permutations)
+        self.shuffle = shuffle_dataset
+        self.batch_size = batch_size
+        self.sub_input_shape = subinput_shape
+        self.permutations = permutations
+        self.examples_path = examples_path
+
+    def run_debug(self, markers=True):
+        print("Generating examples...")
+        scale = 15
+        xb, yb = self.gen.next()
+        max_imgs = len(xb) // 2
+        sr, sc, channels = self.sub_input_shape
+        for index, x in enumerate(xb[:max_imgs]):
+            subimages = self.generate_frames(np.array([x]))
+            x = cv2.normalize(x, None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_32F)
+            x = x.astype(np.uint8)
+            if channels == 1:
+                x = cv2.cvtColor(x, cv2.COLOR_GRAY2RGB)
+            imgs = []
+            x = resize_img(x, scale=scale)
+            for i, ((row, col), subimg) in enumerate(zip(self.permutations, subimages)):
+                if int(row) == row and int(col) == col:
+                    color = (0, 255, 0)
+                    width = int(0.02 * x.shape[0])
+                elif int(row) == row or int(col) == col:
+                    color = (0, 0, 255)
+                    width = int(0.02 * x.shape[0])
+                else:
+                    color = (255, 0, 0)
+                    width = int(0.02 * x.shape[0])
+                if markers:
+                    x = cv2.rectangle(x, (int(row * sr) * scale, int(col * sc) * scale),
+                                      (int((row + 1) * sr * scale), int((col + 1) * sc) * scale),
+                                      color, width)
+                subimg = subimg[0, ...]
+                subimg = cv2.normalize(subimg, None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_32F)
+                subimg = subimg.astype(np.uint8)
+                if channels == 1:
+                    subimg = cv2.cvtColor(subimg, cv2.COLOR_GRAY2RGB)
+                subimg = resize_img(subimg, scale=scale)
+                padded = pad(subimg, x.shape)
+                res = np.hstack((x, padded))
+                imgs.append(res)
+            gif_path = join(self.examples_path, f'frames-{index + 1}.gif')
+            imageio.mimsave(gif_path, imgs, fps=55, duration=0.5)
+
+    def next(self):
+        x, y = self.gen.next()
+        xp = self.generate_frames(x)
+        return xp, y
+
+    def on_epoch_end(self):
+        pass
+
+    def __getitem__(self, index):
+        return self.next()
+
+    def __len__(self):
+        return self.n // self.batch_size
+
+    def generate_frames(self, x_batch):
+        sr, sc, _ = self.sub_input_shape
+        x_frames = []
+        for (row, col), perm in self.permutations.items():
+            xb = np.zeros((x_batch.shape[0], *self.sub_input_shape))
+            r_s = slice(int(row * sr), int((row + 1) * sr))
+            c_s = slice(int(col * sc), int((col + 1) * sc))
+            if type(perm[0]) == BlockScramble:
+                xb = permute(x_batch[:, r_s, c_s, :], perm[0])
+            else:
+                for i, x in enumerate(x_batch):
+                    sub_img = x[r_s, c_s, :]
+                    xb[i, ...] = permute(sub_img, perm)
+            x_frames.append(xb)
+        return x_frames
+
+
 def permute(arr, perm):
     if type(perm) == BlockScramble:
         return perm.Scramble(arr)
+
     res = np.zeros(arr.shape)
     for c in range(arr.shape[-1]):
         channel = arr[:, :, c]
@@ -121,114 +204,24 @@ def resize_img(img, scale):
     return np.array(Image.fromarray(img).resize(dim, resample=Image.NEAREST))
 
 
-class PermutationGenerator(tf.keras.utils.Sequence):
-    def __init__(self, X, Y, augmenter: ImageDataGenerator, subinput_shape,
-                 shuffle_dataset=True, batch_size=None, permutations=None, debug_path=None):
-        self.Y = Y.copy()
-        self.X = X.copy()
-        self.n = len(X)
-        self.datagen = augmenter
-        self.shuffle = shuffle_dataset
-        self.batch_size = batch_size
-        self.subinput_shape = subinput_shape
-        self.gen = self.datagen.flow(self.X, self.Y, batch_size=self.batch_size, shuffle=shuffle_dataset)
-        self.permutations = permutations
-        self.n_frames = len(permutations)
-        self.debug_path = debug_path
-
-    def run_debug(self, markers=True):
-        print("Generating examples...")
-        scale = 20
-
-        if self.debug_path is None:
-            return
-        xb, yb = self.gen.next()
-        max_imgs = len(xb) // 2
-        sr, sc, channels = self.subinput_shape
-        for index, x in enumerate(xb[:max_imgs]):
-            subimages = self.generate_frames(np.array([x]))
-            x = cv2.normalize(x, None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_32F)
-            x = x.astype(np.uint8)
-            if channels == 1:
-                x = cv2.cvtColor(x, cv2.COLOR_GRAY2RGB)
-            imgs = []
-            x = resize_img(x, scale=scale)
-            for i, ((row, col), subimg) in enumerate(zip(self.permutations, subimages)):
-                if int(row) == row and int(col) == col:
-                    color = (0, 255, 0)
-                    width = int(0.02 * x.shape[0])
-                elif int(row) == row or int(col) == col:
-                    color = (0, 0, 255)
-                    width = int(0.02 * x.shape[0])
-                else:
-                    color = (255, 0, 0)
-                    width = int(0.02 * x.shape[0])
-                if markers:
-                    x = cv2.rectangle(x,
-                                      (int(row * sr) * scale, int(col * sc) * scale),
-                                      (int((row + 1) * sr * scale), int((col + 1) * sc) * scale),
-                                      color, width)
-                subimg = subimg[0, ...]
-                subimg = cv2.normalize(subimg, None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_32F)
-                subimg = subimg.astype(np.uint8)
-                if channels == 1:
-                    subimg = cv2.cvtColor(subimg, cv2.COLOR_GRAY2RGB)
-                subimg = resize_img(subimg, scale=scale)
-                padded = pad(subimg, x.shape)
-                res = np.hstack((x, padded))
-                imgs.append(res)
-            gif_path = join(self.debug_path, f'frames-{index + 1}.gif')
-            imageio.mimsave(gif_path, imgs, fps=55, duration=0.5)
-
-    def next(self):
-        x, y = self.gen.next()
-        xp = self.generate_frames(x)
-        return xp, y
-
-    def on_epoch_end(self):
-        pass
-
-    def __getitem__(self, index):
-        return self.next()
-
-    def __len__(self):
-        return self.n // self.batch_size
-
-    def generate_frames(self, x_batch):
-        sr, sc, _ = self.subinput_shape
-        x_frames = []
-        for (row, col), perm in self.permutations.items():
-            xb = np.zeros((x_batch.shape[0], *self.subinput_shape))
-            r_s = slice(int(row * sr), int((row + 1) * sr))
-            c_s = slice(int(col * sc), int((col + 1) * sc))
-            if type(perm[0]) == BlockScramble:
-                xb = permute(x_batch[:, r_s, c_s, :], perm[0])
-            else:
-                for i, x in enumerate(x_batch):
-                    sub_img = x[r_s, c_s, :]
-                    xb[i, ...] = permute(sub_img, perm)
-            x_frames.append(xb)
-        return x_frames
-
-
 if __name__ == '__main__':
     from keras.datasets import cifar10
 
     (x_train, y_train), (x_test, y_test) = cifar10.load_data()
     input_shape = (32, 32, 3)
 
-    debug_dir = 'blockshuffle_imgs'
+    debug_dir = '../blockshuffle_imgs'
     pathlib.Path(debug_dir).mkdir(exist_ok=True)
     perms = generate_permutations(seed=42, grid_shape=(1, 1), subinput_shape=input_shape, overlap=Overlap.CENTER,
                                   scheme=PermSchemas.BS_4_3)
     gen = PermutationGenerator(x_train, y_train, ImageDataGenerator(), input_shape, permutations=perms,
-                               batch_size=32, debug_path=debug_dir, shuffle_dataset=False)
+                               batch_size=32, examples_path=debug_dir, shuffle_dataset=False)
     gen.run_debug(markers=False)
 
-    debug_dir = 'fullshuffle'
+    debug_dir = '../fullshuffle'
     pathlib.Path(debug_dir).mkdir(exist_ok=True)
     perms = generate_permutations(seed=42, grid_shape=(1, 1), subinput_shape=input_shape, overlap=Overlap.CENTER,
                                   scheme=PermSchemas.FULL)
     gen = PermutationGenerator(x_train, y_train, ImageDataGenerator(), input_shape, permutations=perms,
-                               batch_size=32, debug_path=debug_dir, shuffle_dataset=False)
+                               batch_size=32, examples_path=debug_dir, shuffle_dataset=False)
     gen.run_debug(markers=False)
