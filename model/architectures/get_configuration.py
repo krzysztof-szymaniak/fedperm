@@ -9,7 +9,7 @@ def get_config(model_type):
         ),
         ModelType.ADAPTATION_INCEPTION: adaptation_inception(
             filters=[128, [32, 64, 32, 64]],
-            n=3,
+            n=2,
         ),
         ModelType.ADAPTATION_RESNET_V2: adaptation_resnet_v2(
             filters=[128, 32, 64],

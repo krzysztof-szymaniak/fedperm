@@ -30,7 +30,9 @@ def convolutional_block(prev_layer, kernel, f, stage, block, s, v, m_id, i_dir, 
         x_skip = Conv(x_skip, f, (1, 1), s=s, padding='valid', act=False, bn=False,
                       block_name=conv_name_base.replace('[k]', '1') + '_skip', i_dir=i_dir, dr=dr)
     m_name = f'ConvBlock{kernel}x{kernel}-st{stage}-bl{block}-m{m_id}'
-    x = SqueezeExcite(x.shape[-1], i_dir, f'SE-{m_name}')(x)
+    se = SqueezeExcite(x.shape[-1])
+    se.plot_model(f'SE-{m_name}', i_dir, x.shape[-1])
+    x = se(x)
     x = Add()([x, x_skip])
     x = BatchNormalization()(x)
     x = ReLU()(x)
@@ -60,7 +62,9 @@ def identity_block(prev_layer, kernel, filters, stage, block, v, m_id, i_dir, dr
                  block_name=conv_name_base.replace('[k]', str(kernel)) + '_br2b', i_dir=i_dir, dr=dr)
 
     m_name = f'IdentityBlock{kernel}x{kernel}-st{stage}-bl{block}-m{m_id}'
-    x = SqueezeExcite(x.shape[-1], i_dir, f'SE-{m_name}')(x)
+    se = SqueezeExcite(x.shape[-1])
+    se.plot_model(f'SE-{m_name}', i_dir, x.shape[-1])
+    x = se(x)
     x = Add()([x, x_skip])
     x = BatchNormalization()(x)
     x = ReLU()(x)

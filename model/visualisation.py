@@ -4,7 +4,7 @@ from contextlib import redirect_stdout
 
 import visualkeras
 from PIL import ImageFont
-from keras.layers import Dense, Conv2D, SpatialDropout2D, Dropout, MaxPooling2D, BatchNormalization, GlobalAveragePooling2D, Add, Multiply
+from tensorflow.keras.layers import Dense, Conv2D, SpatialDropout2D, Dropout, MaxPooling2D, BatchNormalization, GlobalAveragePooling2D, Add, Multiply
 from tensorflow.keras import utils
 
 VISUALIZE_IN_SEGMENTS = True
@@ -27,5 +27,5 @@ def plot_model(folder, model, filename):
         with redirect_stdout(f):
             model.summary()
 
-    font = ImageFont.truetype("arial.ttf", 16)  # using comic sans is strictly prohibited!
-    visualkeras.layered_view(model, to_file=f'{folder}/{filename}_layered.png', legend=True, font=font)
+    # font = ImageFont.truetype("arial.ttf", 16)  # using comic sans is strictly prohibited!
+    visualkeras.layered_view(model, to_file=f'{folder}/{filename}_layered.png', legend=True)

@@ -28,9 +28,11 @@ def Inception(prev_layer, filters, stage, block, dr, m_id, i_dir):
               block_name=conv_name_base.replace('[k]', '1') + '_br4', dr=dr, i_dir=i_dir)
 
     x = Concatenate()([b1, b2, b3, b4])
-    x = SqueezeExcite(x.shape[-1])(x)
+    m_name = f'InceptionBlock-st{stage}-bl{block}-m{m_id}'
+    se = SqueezeExcite(x.shape[-1])
+    se.plot_model(f'SE-{m_name}', i_dir, x.shape[-1])
+    x = se(x)
     if VISUALIZE_IN_SEGMENTS:
-        m_name = f'InceptionBlock-st{stage}-bl{block}-m{m_id}'
         m = Model(inputs=_in, outputs=x, name=m_name)
         plot_model(f'{i_dir}/resnet-inception-blocks', m, m_name)
         return m(prev_layer)

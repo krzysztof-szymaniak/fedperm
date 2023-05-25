@@ -17,7 +17,9 @@ def Conv(prev_layer, F, k, s, block_name, padding='same', act=True, bn=True, se=
     x = _in
     x = Conv2D(F, k, strides=s, name=block_name, padding=padding, kernel_regularizer=l2(l2_reg) if l2_reg else None)(x)
     if se:
-        x = SqueezeExcite(x.shape[-1], i_dir, f'SE-{block_name}')(x)
+        se = SqueezeExcite(x.shape[-1])
+        se.plot_model(f'SE-{block_name}', i_dir, x.shape[-1])
+        x = se(x)
     if bn:
         x = BatchNormalization()(x)
     if act:
@@ -32,12 +34,13 @@ def Conv(prev_layer, F, k, s, block_name, padding='same', act=True, bn=True, se=
 
 
 class SqueezeExcite(Layer):
-    def __init__(self, filters, i_dir, block_name, **kwargs):
+    def __init__(self, filters, **kwargs):
         super().__init__(**kwargs)
         ratio = 16
+        self.filters = filters
         self.squeeze = Dense(filters // ratio, activation='relu', use_bias=False)
         self.excite = Dense(filters, activation='sigmoid', use_bias=False)
-        self.plot_model(block_name, i_dir, filters)
+        # self.plot_model(block_name, i_dir, filters)
 
     def plot_model(self, block_name, i_dir, filters):
         inputs = Input(shape=(16, 16, filters))

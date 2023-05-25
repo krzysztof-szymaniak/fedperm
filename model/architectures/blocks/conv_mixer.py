@@ -14,14 +14,18 @@ def conv_mixer_block(prev_layer, filters, kernel_size, st, m_id, i_dir, dr):
     _in = Input(prev_layer.shape[1:]) if VISUALIZE_IN_SEGMENTS else prev_layer
     x_skip = _in
     x = DepthwiseConv2D(kernel_size=kernel_size, padding="same", depthwise_regularizer=l2(1e-4))(_in)
-    x = SqueezeExcite(x.shape[-1], i_dir, f'SE-dep-{block_name}')(x)
+    se = SqueezeExcite(x.shape[-1])
+    se.plot_model(f'SE-dep-{block_name}', i_dir, x.shape[-1])
+    x = se(x)
     x = Activation("gelu")(x)
     x = BatchNormalization()(x)
     x = Add()([x, x_skip])  # Residual.
     if dr:
         x = SpatialDropout2D(dr)(x)
     x = Conv2D(filters, kernel_size=1, kernel_regularizer=l2(1e-4))(x)
-    x = SqueezeExcite(x.shape[-1], i_dir, block_name=f'SE-pix-{block_name}')(x)
+    se = SqueezeExcite(x.shape[-1])
+    se.plot_model(f'SE-pix-{block_name}', i_dir, x.shape[-1])
+    x = se(x)
     x = Activation("gelu")(x)
     x = BatchNormalization()(x)
     if VISUALIZE_IN_SEGMENTS:

@@ -1,10 +1,12 @@
 import pathlib
 import sys
+import time
+from datetime import timedelta
 from os.path import join
 from pprint import pprint
 
 import numpy as np
-from keras.callbacks import Callback
+from tensorflow.keras.callbacks import Callback
 from matplotlib import pyplot as plt
 
 info_dir_name = "train"
@@ -14,6 +16,8 @@ testing_dir_name = 'test'
 
 
 def save_training_info(model, training_info_dir):
+    if model.history is None:
+        return
     plt.close('all')
     plt.ioff()
     history = model.history
@@ -67,8 +71,8 @@ class PlotProgress(Callback):
     loss_ep = 0
     val_loss_ep = 0
 
-    def __init__(self, i_dir, verbose=True):
-        pathlib.Path(i_dir).mkdir(exist_ok=True, parents=True)
+    def __init__(self, i_dir, name, verbose=True):
+        self.name = name
         super().__init__()
         self.verbose = verbose
         self.axs = None
@@ -78,6 +82,7 @@ class PlotProgress(Callback):
         pathlib.Path(self.i_dir).mkdir(exist_ok=True, parents=True)
         self.first_epoch = True
         self.metrics = {}
+        self.start_time = time.time()
         plt.ion()
 
     def on_epoch_end(self, epoch, logs=None):
@@ -94,6 +99,9 @@ class PlotProgress(Callback):
                 self.f, self.axs = plt.subplots(2, 3, figsize=(12, 8))
             else:
                 self.f, self.axs = plt.subplots(1, 3, figsize=(12, 4))
+            self.f.suptitle(
+                f'{self.name}  training time: {str(timedelta(seconds=time.time() - self.start_time))}'
+            )
 
         acc = max(self.max_acc, round(logs.get("accuracy"), 4))
         val_acc = max(self.max_val_acc, round(logs.get("val_accuracy"), 4))

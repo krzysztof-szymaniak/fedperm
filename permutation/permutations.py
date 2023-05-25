@@ -6,7 +6,7 @@ import imageio
 import numpy as np
 import tensorflow as tf
 from PIL import Image
-from keras_preprocessing.image import ImageDataGenerator
+from tensorflow.keras.preprocessing.image import ImageDataGenerator
 from sklearn.utils import shuffle
 
 from enums import Overlap, PermSchemas
@@ -76,7 +76,7 @@ def generate_perm(shape, seed=None, blockSize=None):
 
 
 def generate_permutations(seed, grid_shape, subinput_shape, overlap, scheme):
-    n_repeats = subinput_shape[-1] if 'blockwise' not in scheme.name.lower() else 1
+    n_repeats = subinput_shape[-1] if scheme in [PermSchemas.FULL, PermSchemas.IDENTITY] else 1
     random_states = init_keys(seed, grid_shape, overlap, n_repeats)
     permutations = {}
     for (row, col), frame_seeds in random_states.items():
@@ -84,7 +84,11 @@ def generate_permutations(seed, grid_shape, subinput_shape, overlap, scheme):
             permutations[(row, col)] = [generate_perm(subinput_shape) for _ in range(n_repeats)]
         else:
             permutations[(row, col)] = [
-                generate_perm(subinput_shape, blockSize=scheme.value if scheme else None, seed=fr) for fr in
+                generate_perm(subinput_shape,
+                              blockSize=scheme.value if scheme not in [PermSchemas.FULL,
+                                                                       PermSchemas.IDENTITY] else None,
+                              seed=fr) for fr
+                in
                 frame_seeds]
     return permutations
 
@@ -92,10 +96,8 @@ def generate_permutations(seed, grid_shape, subinput_shape, overlap, scheme):
 class PermutationGenerator(tf.keras.utils.Sequence):
     def __init__(self, X, Y, augmenter, subinput_shape, shuffle_dataset=True, batch_size=None, permutations=None,
                  examples_path=None):
-        self.Y = Y.copy()
-        self.X = X.copy()
         self.n = len(X)
-        self.gen = augmenter.flow(self.X, self.Y, batch_size=batch_size, shuffle=shuffle_dataset)
+        self.gen = augmenter.flow(X, Y, batch_size=batch_size, shuffle=shuffle_dataset)
         self.n_frames = len(permutations)
         self.shuffle = shuffle_dataset
         self.batch_size = batch_size

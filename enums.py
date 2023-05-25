@@ -26,6 +26,7 @@ class PermSchemas(Enum):
     BS_7_1 = (7, 7, 1)
     BS_2_3 = (2, 2, 3)
     BS_2_1 = (2, 2, 1)
+    IDENTITY = 'identity'
 
 
 class ModelType(Enum):

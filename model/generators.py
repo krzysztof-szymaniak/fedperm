@@ -1,11 +1,10 @@
-from keras_preprocessing.image import ImageDataGenerator
+from tensorflow.keras.preprocessing.image import ImageDataGenerator
 
 from model.train_configs import BATCH_SIZE, augmentation
 from permutation.permutations import PermutationGenerator
 
 
-def get_train_valid_gens(data, permutations, sub_input_shape, examples_path, apply_flip=False):
-    x_train, y_train, x_val, y_val = data
+def get_train_valid_gens(x_train, y_train, x_val, y_val, permutations, sub_input_shape, examples_path, apply_flip=False):
     train_ds = get_generator(x_train, y_train,
                              batch_size=BATCH_SIZE,
                              permutations=permutations,

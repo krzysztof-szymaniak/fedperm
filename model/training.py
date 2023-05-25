@@ -9,37 +9,49 @@ from sklearn.metrics import classification_report, accuracy_score
 from tensorflow.keras import Model
 from tensorflow.keras.layers import Input
 from tensorflow.keras.models import load_model
+from keras.utils.generic_utils import CustomMaskWarning
 
 from enums import Aggregation
 from model.architectures.build_model import get_model, aggregate
 from model.generators import get_train_valid_gens, get_generator
-from model.train_configs import compile_opts, epochs, BATCH_SIZE, callbacks
+from model.train_configs import compile_opts, MAX_EPOCHS, BATCH_SIZE, callbacks
 from model.utils import save_training_info, set_up_dirs
 from model.visualisation import plot_model
 from permutation.permutations import generate_permutations
 
+import warnings
+from sklearn.exceptions import UndefinedMetricWarning
+import os
 
-def train_model(data, model_path, permutations, sub_input_shape, n_classes, ds_name, arch, mode,
-                aggr_scheme=None, m_id=None):
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'  # suppress logging
+warnings.filterwarnings(action='ignore', category=UndefinedMetricWarning)
+warnings.filterwarnings(action='ignore', category=CustomMaskWarning)
+
+skip_all_training = True
+
+
+def train_model(x_train, y_train, x_val, y_val, model_path, permutations, sub_input_shape, n_classes, ds_name, arch,
+                mode, aggr_scheme=None, m_id=None):
     training_info_dir, examples_info_dir, arch_info_dir, checkpoints_dir = set_up_dirs(model_path)
     train_dirs = (model_path, checkpoints_dir, training_info_dir)
-    generators = get_train_valid_gens(data,
+    generators = get_train_valid_gens(x_train, y_train, x_val, y_val,
                                       permutations=permutations,
                                       sub_input_shape=sub_input_shape,
                                       apply_flip=ds_name != 'mnist' and ds_name != 'emnist-letters',
                                       examples_path=examples_info_dir)
     save_permutation(model_path, permutations)
     if mode == 'single':
-        model = get_model(arch, arch_info_dir, sub_input_shape, n_classes, m_id=m_id, ds_name=ds_name)
+        model = get_model(arch, arch_info_dir, sub_input_shape, n_classes, m_id=m_id, )
         model.compile(**compile_opts(n_classes))
-        fit_model(model, generators, train_dirs)
+        name = f'{ds_name}-{arch.name.lower()}-{mode}-{m_id}'
+        fit_model(model, generators, train_dirs, name)
         return model
 
     models = []
     if mode == 'parallel':
         for i, _ in enumerate(permutations):
             sub_model_path = join(model_path, "subs", str(i))
-            model = get_model(sub_model_path, arch_info_dir, sub_input_shape, n_classes, m_id=i, ds_name=ds_name)
+            model = get_model(sub_model_path, arch_info_dir, sub_input_shape, n_classes, m_id=i, )
             model = strip_last_layer(model)
             models.append(model)
 
@@ -50,7 +62,8 @@ def train_model(data, model_path, permutations, sub_input_shape, n_classes, ds_n
             sub_model_path = join(model_path, "subs", str(i))
             sub_model_paths.append(sub_model_path)
             if not skip_training(sub_model_path):
-                train_model(data, sub_model_path, sub_perm, sub_input_shape, n_classes, ds_name, arch, mode='single',
+                train_model(x_train, y_train, x_val, y_val, sub_model_path, sub_perm, sub_input_shape, n_classes,
+                            ds_name, arch, mode='single',
                             m_id=i, )
 
         for sub_path in sub_model_paths:
@@ -67,18 +80,21 @@ def train_model(data, model_path, permutations, sub_input_shape, n_classes, ds_n
     aggregated_model.summary()
     plot_model(arch_info_dir, aggregated_model, mode)
     aggregated_model.compile(**compile_opts(n_classes))
-    fit_model(aggregated_model, generators, train_dirs)
+    name = f'{ds_name}-{arch.name.lower()}-{mode}'
+    fit_model(aggregated_model, generators, train_dirs, name)
     return aggregated_model
 
 
-def fit_model(model, data, dirs):
+def fit_model(model, data, dirs, name):
+    print("Training ", name)
     model_path, checkpoints_dir, training_info_dir = dirs
     train_ds, valid_ds = data
     try:
-        model.fit(train_ds, epochs=epochs, verbose=1, validation_data=valid_ds,
-                  steps_per_epoch=len(train_ds.X) // BATCH_SIZE,
-                  validation_steps=len(valid_ds.X) // BATCH_SIZE,
-                  callbacks=callbacks(checkpoints_dir, training_info_dir))
+        if not skip_all_training:
+            model.fit(train_ds, epochs=MAX_EPOCHS, verbose=1, validation_data=valid_ds,
+                      steps_per_epoch=train_ds.n // BATCH_SIZE,
+                      validation_steps=valid_ds.n // BATCH_SIZE,
+                      callbacks=callbacks(checkpoints_dir, training_info_dir, name))
     except KeyboardInterrupt:
         print("\nInterrupted!")
     weights_path = join(checkpoints_dir, 'weights.h5')
@@ -91,7 +107,9 @@ def fit_model(model, data, dirs):
     return model
 
 
-def predict(model_path, data, sub_input_shape, classes_names, mode=None, test_dir_name=None, invalid_test=None):
+def predict(model_path, x_test, y_test, sub_input_shape, classes_names, mode=None, test_dir_name=None,
+            invalid_test=None):
+    print("Predicting ", model_path)
     if test_dir_name is None:
         test_dir_name = 'test'
     permutations = load_permutation(model_path)
@@ -106,14 +124,12 @@ def predict(model_path, data, sub_input_shape, classes_names, mode=None, test_di
     if mode == 'composite':
         for i, _ in enumerate(permutations):
             sub_model_path = join(model_path, "subs", str(i))
-            predict(sub_model_path, data, sub_input_shape, classes_names, mode='single',
+            predict(sub_model_path, x_test, y_test, sub_input_shape, classes_names, mode='single',
                     test_dir_name=test_dir_name, invalid_test=invalid_test)
 
-    print(f'Predicting {model_path}')
     model = load_model(model_path)
     testing_path = join(model_path, test_dir_name)
     pathlib.Path(testing_path).mkdir(exist_ok=True, parents=True)
-    x_test, y_test = data
     test_gen = get_generator(x_test, y_test,
                              batch_size=len(x_test),
                              permutations=permutations,
