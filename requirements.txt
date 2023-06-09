@@ -1,0 +1,13 @@
+numpy
+tensorflow
+tensorflow-gpu
+matplotlib
+sklearn
+scikit-learn
+keras
+visualkeras
+pillow
+opencv-python
+imageio
+scipy
+albumentations

@@ -2,30 +2,46 @@ import pathlib
 from collections import defaultdict
 from contextlib import redirect_stdout
 
+import numpy as np
 import visualkeras
 from PIL import ImageFont
-from tensorflow.keras.layers import Dense, Conv2D, SpatialDropout2D, Dropout, MaxPooling2D, BatchNormalization, GlobalAveragePooling2D, Add, Multiply
+from matplotlib import colors
+from tensorflow.keras.layers import Dense, Conv2D, SpatialDropout2D, Dropout, MaxPooling2D, BatchNormalization, \
+    GlobalAveragePooling2D, Add, Multiply, DepthwiseConv2D, Concatenate, Activation
 from tensorflow.keras import utils
 
-VISUALIZE_IN_SEGMENTS = True
-
-color_map = defaultdict(dict)
-color_map[Conv2D]['fill'] = 'orange'
-color_map[BatchNormalization]['fill'] = 'gray'
-color_map[SpatialDropout2D]['fill'] = 'pink'
-color_map[Dropout]['fill'] = 'pink'
-color_map[MaxPooling2D]['fill'] = 'red'
-color_map[Dense]['fill'] = 'green'
-color_map[GlobalAveragePooling2D]['fill'] = 'teal'
-color_map[Add]['fill'] = 'purple'
+SAVE_VIZ = False
 
 
-def plot_model(folder, model, filename):
-    pathlib.Path(folder).mkdir(exist_ok=True, parents=True)
-    utils.plot_model(model, show_layer_names=True, show_shapes=True, to_file=f'{folder}/{filename}.png')
-    with open(f'{folder}/{filename}.txt', 'w') as f:
+def plot_model(save_folder, model, filename):
+    pathlib.Path(save_folder).mkdir(exist_ok=True, parents=True)
+    if SAVE_VIZ:
+        utils.plot_model(
+            model, show_layer_names=False, show_shapes=True, to_file=f'{save_folder}/{filename}_summary.png'
+        )
+    with open(f'{save_folder}/{filename}.txt', 'w') as f:
         with redirect_stdout(f):
             model.summary()
 
-    # font = ImageFont.truetype("arial.ttf", 16)  # using comic sans is strictly prohibited!
-    visualkeras.layered_view(model, to_file=f'{folder}/{filename}_layered.png', legend=True)
+    # font = ImageFont.truetype("arial.ttf", 14)
+    if SAVE_VIZ:
+        visualkeras.layered_view(
+            model, to_file=f'{save_folder}/{filename}_layers.png',
+            legend=True,
+            color_map=get_color_map()
+        )
+
+
+def get_color_map():
+    layers = [
+        Dense, Conv2D, SpatialDropout2D, Dropout, MaxPooling2D, BatchNormalization,
+        GlobalAveragePooling2D, Add, Multiply, DepthwiseConv2D, Concatenate, Activation
+    ]
+
+    np.random.seed(1234)
+    palette = np.random.choice(list(colors.CSS4_COLORS), len(layers))
+    np.random.seed()
+    color_map = defaultdict(dict)
+    for i, l in enumerate(layers):
+        color_map[l]['fill'] = palette[i]
+    return color_map

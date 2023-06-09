@@ -1,3 +1,4 @@
+import os.path
 import pathlib
 import sys
 import time
@@ -33,7 +34,7 @@ def save_training_info(model, training_info_dir):
         if f"val_{met}" in history.history:
             plt.legend(['train', 'validate'], loc='right')
         else:
-            plt.legend(['train'], loc='right')
+            plt.legend([met], loc='right')
         plt.savefig(join(training_info_dir, met))
         plt.clf()
     np.save(join(training_info_dir, "history.npy"), history.history)
@@ -71,15 +72,15 @@ class PlotProgress(Callback):
     loss_ep = 0
     val_loss_ep = 0
 
-    def __init__(self, i_dir, name, verbose=True):
+    def __init__(self, info_dir, name, verbose=True):
         self.name = name
         super().__init__()
         self.verbose = verbose
         self.axs = None
         self.f = None
         self.metrics = None
-        self.i_dir = i_dir
-        pathlib.Path(self.i_dir).mkdir(exist_ok=True, parents=True)
+        self.info_dir = info_dir
+        pathlib.Path(self.info_dir).mkdir(exist_ok=True, parents=True)
         self.first_epoch = True
         self.metrics = {}
         self.start_time = time.time()
@@ -99,9 +100,9 @@ class PlotProgress(Callback):
                 self.f, self.axs = plt.subplots(2, 3, figsize=(12, 8))
             else:
                 self.f, self.axs = plt.subplots(1, 3, figsize=(12, 4))
-            self.f.suptitle(
-                f'{self.name}  training time: {str(timedelta(seconds=time.time() - self.start_time))}'
-            )
+        self.f.suptitle(
+            f'{self.name}  training time: {str(timedelta(seconds=time.time() - self.start_time)).split(".")[0]}'
+        )
 
         acc = max(self.max_acc, round(logs.get("accuracy"), 4))
         val_acc = max(self.max_val_acc, round(logs.get("val_accuracy"), 4))
@@ -154,4 +155,4 @@ class PlotProgress(Callback):
         plt.tight_layout()
         self.f.canvas.draw()
         self.f.canvas.flush_events()
-        self.f.savefig(f"{self.i_dir}/progress.png")
+        self.f.savefig(f"{self.info_dir}/progress.png")

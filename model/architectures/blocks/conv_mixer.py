@@ -1,35 +1,67 @@
 from tensorflow.keras import Input
-from tensorflow.keras.layers import (
-    Conv2D, Activation, DepthwiseConv2D, GlobalAveragePooling2D, BatchNormalization, ReLU, SpatialDropout2D,
-    Multiply, Add, Dense, Dropout, Flatten, Layer)
+from tensorflow.keras.layers import (Conv2D, Activation, DepthwiseConv2D, BatchNormalization, SpatialDropout2D, Add,
+                                     Layer)
 from tensorflow.keras import Model
-from tensorflow.keras.regularizers import l2, l1_l2
+from tensorflow.keras.regularizers import l2
 
 from model.architectures.blocks.basic import SqueezeExcite
-from model.visualisation import plot_model, VISUALIZE_IN_SEGMENTS
+from model.visualisation import plot_model
 
 
-def conv_mixer_block(prev_layer, filters, kernel_size, st, m_id, i_dir, dr):
-    block_name = f"ConvMixer{kernel_size}x{kernel_size}-st{st}-m{m_id}"
-    _in = Input(prev_layer.shape[1:]) if VISUALIZE_IN_SEGMENTS else prev_layer
-    x_skip = _in
-    x = DepthwiseConv2D(kernel_size=kernel_size, padding="same", depthwise_regularizer=l2(1e-4))(_in)
-    se = SqueezeExcite(x.shape[-1])
-    se.plot_model(f'SE-dep-{block_name}', i_dir, x.shape[-1])
-    x = se(x)
-    x = Activation("gelu")(x)
-    x = BatchNormalization()(x)
-    x = Add()([x, x_skip])  # Residual.
-    if dr:
-        x = SpatialDropout2D(dr)(x)
-    x = Conv2D(filters, kernel_size=1, kernel_regularizer=l2(1e-4))(x)
-    se = SqueezeExcite(x.shape[-1])
-    se.plot_model(f'SE-pix-{block_name}', i_dir, x.shape[-1])
-    x = se(x)
-    x = Activation("gelu")(x)
-    x = BatchNormalization()(x)
-    if VISUALIZE_IN_SEGMENTS:
-        m = Model(inputs=_in, outputs=x, name=block_name)
-        plot_model(f'{i_dir}/conv-mixer', m, block_name)
-        return m(prev_layer)
-    return x
+class ConvMixerBlock(Layer):
+    def __init__(self, filters, kernel_size, in_shape, block_name, dr, **kwargs):
+        super().__init__(**kwargs)
+        self.filters = filters
+        self.kernel_size = kernel_size
+        self.in_shape = in_shape
+        self.dr = dr
+        self.block_name = block_name
+        self.depthwise = DepthwiseConv2D(
+            kernel_size=kernel_size, padding="same", depthwise_regularizer=l2(1e-4), kernel_initializer='he_normal'
+        )
+        self.act1 = Activation("gelu")
+        self.bn1 = BatchNormalization()
+        self.add = Add()
+        self.pointwise = Conv2D(
+            filters, kernel_size=1, kernel_regularizer=l2(1e-4), kernel_initializer='he_normal'
+        )
+        self.se = SqueezeExcite(in_shape[-1])
+        self.act2 = Activation("gelu")
+        self.bn2 = BatchNormalization()
+        self.dropout = SpatialDropout2D(dr) if dr else None
+
+    def call(self, inputs):
+        x_skip = inputs
+        x = self.depthwise(inputs)
+        x = self.act1(x)
+        x = self.bn1(x)
+        x = self.add([x, x_skip])
+        x = self.pointwise(x)
+        x = self.se(x)
+        x = self.act2(x)
+        x = self.bn2(x)
+        if self.dropout:
+            x = self.dropout(x)
+        return x
+
+    def plot_layer(self, in_shape, i_dir):
+        self.se.plot_model(f'SE-{self.block_name}', i_dir)
+        inputs = Input(in_shape[1:])
+        _out = self.call(inputs)
+        model = Model(inputs=inputs, outputs=_out, name=self.block_name)
+        plot_model(f'{i_dir}/conv-mixer', model, self.block_name)
+
+    def get_config(self):
+        config = {
+            'filters': self.filters,
+            'kernel_size': self.kernel_size,
+            'block_name': self.block_name,
+            'dr': self.dr,
+            'in_shape': self.in_shape,
+        }
+        base_config = super(ConvMixerBlock, self).get_config()
+
+        return dict(list(base_config.items()) + list(config.items()))
+
+    def compute_output_shape(self, input_shape):
+        return input_shape

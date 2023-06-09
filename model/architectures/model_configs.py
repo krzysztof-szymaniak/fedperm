@@ -3,40 +3,41 @@ from enums import ModelType
 
 def get_config(model_type):
     configs = {
-        ModelType.ADAPTATION_VGG: adaptation_vgg(
-            filters=[128, 32, 64],
-            n=3,
-        ),
-        ModelType.ADAPTATION_INCEPTION: adaptation_inception(
-            filters=[128, [32, 64, 32, 64]],
-            n=2,
-        ),
-        ModelType.ADAPTATION_RESNET_V2: adaptation_resnet_v2(
-            filters=[128, 32, 64],
-            n=3,
-        ),
+        # ModelType.ADAPTATION_VGG: adaptation_vgg(
+        #     filters=[128, 32, 64],
+        #     n=3,
+        # ),
+        # ModelType.ADAPTATION_INCEPTION: adaptation_inception(
+        #     filters=[128, [32, 64, 32, 64]],
+        #     n=2,
+        # ),
+        # ModelType.ADAPTATION_RESNET_V2: adaptation_resnet_v2(
+        #     filters=[128, 32, 64],
+        #     n=3,
+        # ),
         ModelType.CONV_MIXER: conv_mixer(
-            filters=196,
-            n=6,
+            filters=256,
+            n=8,
+            dr=0.02,
         ),
     }
     return configs[model_type]
 
 
-def conv_mixer(filters, n):
+def conv_mixer(filters, n, dr):
     return {
         'v': 'conv-mixer',
         'stem_layer': {
             'filters': filters,
             'stride': 4,
             'kernel': 4,
-            'dropout': 0.1,
+            'dropout': dr,
         },
         'stages': [
             {
                 'n_blocks': n,
                 'filters': filters,
-                'dropout': 0.1,
+                'dropout': dr,
                 'kernel': 5,
             },
         ],

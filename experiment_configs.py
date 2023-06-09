@@ -1,44 +1,22 @@
 from enums import Overlap, PermSchemas, ModelType, Aggregation
 
-datasets = [
-    'cifar10',
-    # 'cifar100',
-    # 'fashion_mnist',
-    # 'emnist-letters',
-    # 'cats_vs_dogs',
-    # 'mnist',
-    # 'eurosat',
-]
-
-
 def get_configs(overlap, aggr, perm_scheme, model_arch):
-    seed = 42
-    return [
-        {
-            'type': 'composite',
-            'seed': seed,
-            'permutation_scheme': perm_scheme,
-            'grid_size': (2, 2),
-            'overlap': overlap,
-            'aggregation': aggr,
-            'model_architecture': model_arch,
-        },
-        {
-            'type': 'composite',
-            'seed': None,
-            'permutation_scheme': PermSchemas.IDENTITY,
-            'grid_size': (2, 2),
-            'overlap': overlap,
-            'aggregation': aggr,
-            'model_architecture': model_arch,
-        },
-    ]
+    seed = 42 if perm_scheme != PermSchemas.IDENTITY else None
+    return {
+        'type': 'composite',
+        'seed': seed,
+        'permutation_scheme': perm_scheme,
+        'grid_size': (2, 2),
+        'overlap': overlap,
+        'aggregation': aggr,
+        'model_architecture': model_arch,
+    }
 
 
 overlaps = [
     Overlap.NONE,
     # Overlap.CENTER,
-    # Overlap.FULL,
+    Overlap.FULL,
 ]
 
 aggregations = [
@@ -47,8 +25,9 @@ aggregations = [
 ]
 
 perm_schemas = [
-    PermSchemas.BS_4_3,
-    # PermSchemas.FULL,
+    PermSchemas.BS_4,
+    PermSchemas.NAIVE,
+    PermSchemas.IDENTITY
 ]
 
 model_types = [
@@ -59,16 +38,65 @@ model_types = [
 ]
 
 
+def get_experiment(version):
+    if 'overlap' in version:
+        aggr = Aggregation.STRIP_CONCAT
+        perm = PermSchemas.BS_4
+        model = ModelType.CONV_MIXER
+        return [
+            get_configs(
+                overlap=Overlap.NONE,
+                aggr=aggr,
+                perm_scheme=perm,
+                model_arch=model
+            ),
+            get_configs(
+                overlap=Overlap.FULL,
+                aggr=aggr,
+                perm_scheme=perm,
+                model_arch=model
+            )
+        ]
+    if 'permutation' in version:
+        aggr = Aggregation.STRIP_CONCAT
+        ov = Overlap.NONE
+        model = ModelType.CONV_MIXER
+        return [
+            get_configs(
+                overlap=ov,
+                aggr=aggr,
+                perm_scheme=PermSchemas.BS_4,
+                model_arch=model
+            ),
+            get_configs(
+                overlap=ov,
+                aggr=aggr,
+                perm_scheme=PermSchemas.NAIVE,
+                model_arch=model
+            ),
+            get_configs(
+                overlap=ov,
+                aggr=aggr,
+                perm_scheme=PermSchemas.IDENTITY,
+                model_arch=model
+            ),
+        ]
+
+
 def get_experiment_config():
-    for ov in overlaps:
-        for aggr in aggregations:
-            for perm in perm_schemas:
-                for model in model_types:
-                    seedful, seedless = get_configs(
-                        overlap=ov,
-                        aggr=aggr,
-                        perm_scheme=perm,
-                        model_arch=model
-                    )
-                    yield seedful
-                    yield seedless
+    return [get_configs(
+        overlap=Overlap.NONE,
+        aggr=Aggregation.STRIP_CONCAT,
+        perm_scheme=PermSchemas.BS_4,
+        model_arch=ModelType.CONV_MIXER
+    )]
+    # for ov in overlaps:
+    #     for aggr in aggregations:
+    #         for perm in perm_schemas:
+    #             for model in model_types:
+    #                 yield get_configs(
+    #                     overlap=ov,
+    #                     aggr=aggr,
+    #                     perm_scheme=perm,
+    #                     model_arch=model
+    #                 ),
