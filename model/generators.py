@@ -49,15 +49,14 @@ def get_generator(
 
 
 def augmentation():
-    transform = A.Compose([
+    return A.Compose([
         A.HorizontalFlip(),
         A.CLAHE(),
-        A.ShiftScaleRotate(shift_limit=0.2, scale_limit=0.3, rotate_limit=35, p=.75),
+        A.ShiftScaleRotate(shift_limit=0.15, scale_limit=0.2, rotate_limit=30, p=.75),
         A.OneOf([
             A.MotionBlur(p=.2),
             A.MedianBlur(blur_limit=3, p=0.2),
             A.Blur(blur_limit=3, p=0.2),
-        ], p=0.3),
-        A.HueSaturationValue(p=0.5),
+        ], p=0.25),
+        A.HueSaturationValue(p=0.4),
     ])
-    return transform

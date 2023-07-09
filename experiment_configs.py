@@ -1,5 +1,6 @@
 from enums import Overlap, PermSchemas, ModelType, Aggregation
 
+
 def get_configs(overlap, aggr, perm_scheme, model_arch):
     seed = 42 if perm_scheme != PermSchemas.IDENTITY else None
     return {
@@ -14,7 +15,7 @@ def get_configs(overlap, aggr, perm_scheme, model_arch):
 
 
 overlaps = [
-    Overlap.NONE,
+    # Overlap.NONE,
     # Overlap.CENTER,
     Overlap.FULL,
 ]
@@ -39,48 +40,41 @@ model_types = [
 
 
 def get_experiment(version):
-    if 'overlap' in version:
-        aggr = Aggregation.STRIP_CONCAT
-        perm = PermSchemas.BS_4
-        model = ModelType.CONV_MIXER
-        return [
-            get_configs(
-                overlap=Overlap.NONE,
-                aggr=aggr,
-                perm_scheme=perm,
-                model_arch=model
-            ),
-            get_configs(
-                overlap=Overlap.FULL,
-                aggr=aggr,
-                perm_scheme=perm,
-                model_arch=model
-            )
-        ]
-    if 'permutation' in version:
-        aggr = Aggregation.STRIP_CONCAT
-        ov = Overlap.NONE
-        model = ModelType.CONV_MIXER
-        return [
-            get_configs(
-                overlap=ov,
-                aggr=aggr,
-                perm_scheme=PermSchemas.BS_4,
-                model_arch=model
-            ),
-            get_configs(
-                overlap=ov,
-                aggr=aggr,
-                perm_scheme=PermSchemas.NAIVE,
-                model_arch=model
-            ),
-            get_configs(
-                overlap=ov,
-                aggr=aggr,
-                perm_scheme=PermSchemas.IDENTITY,
-                model_arch=model
-            ),
-        ]
+    aggr = Aggregation.STRIP_CONCAT
+    perm = PermSchemas.BS_4
+    model = ModelType.CONV_MIXER
+    return [
+        get_configs(
+            overlap=Overlap.FULL,
+            aggr=aggr,
+            perm_scheme=perm,
+            model_arch=model
+        ),
+        get_configs(
+            overlap=Overlap.CENTER,
+            aggr=aggr,
+            perm_scheme=perm,
+            model_arch=model
+        ),
+        get_configs(
+            overlap=Overlap.NONE,
+            aggr=aggr,
+            perm_scheme=perm,
+            model_arch=model
+        ),
+        get_configs(
+            overlap=Overlap.NONE,
+            aggr=aggr,
+            perm_scheme=PermSchemas.NAIVE,
+            model_arch=model
+        ),
+        get_configs(
+            overlap=Overlap.NONE,
+            aggr=aggr,
+            perm_scheme=PermSchemas.IDENTITY,
+            model_arch=model
+        ),
+    ]
 
 
 def get_experiment_config():

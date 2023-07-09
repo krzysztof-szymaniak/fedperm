@@ -22,11 +22,11 @@ def plot_model(save_folder, model, filename):
     with open(f'{save_folder}/{filename}.txt', 'w') as f:
         with redirect_stdout(f):
             model.summary()
-
-    # font = ImageFont.truetype("arial.ttf", 14)
+    # model.summary()
+    # font = ImageFont.truetype("arial.ttf", 12)
     if SAVE_VIZ:
         visualkeras.layered_view(
-            model, to_file=f'{save_folder}/{filename}_layers.png',
+            model, to_file=f'{save_folder}/{filename}.png',
             legend=True,
             color_map=get_color_map()
         )

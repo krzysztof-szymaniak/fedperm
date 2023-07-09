@@ -11,11 +11,11 @@ from tensorflow.keras.optimizers import SGD, Adam
 
 from model.utils import PlotProgress
 
-BATCH_SIZE = 32
+BATCH_SIZE = 64
 MAX_EPOCHS = 200
 
 
-def scheduler(start_ep=15, decay_rate=-0.04, min_rate=5e-7):
+def scheduler(start_ep=15, decay_rate=-0.03, min_rate=5e-7):
     def schedule(epoch, lr):
         if epoch < start_ep:
             return lr

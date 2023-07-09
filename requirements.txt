@@ -11,3 +11,5 @@ opencv-python
 imageio
 scipy
 albumentations
+img2pdf
+tabulate

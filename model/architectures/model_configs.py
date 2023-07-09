@@ -17,8 +17,8 @@ def get_config(model_type):
         # ),
         ModelType.CONV_MIXER: conv_mixer(
             filters=256,
-            n=8,
-            dr=0.02,
+            n=10,
+            dr=None,
         ),
     }
     return configs[model_type]

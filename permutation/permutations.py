@@ -54,7 +54,8 @@ def init_keys(seed, grid_shape, overlap_scheme, n_repeats):
         add_overlap(condition=lambda r, c: int(r) != r and int(c) != c)
 
     elif overlap_scheme == Overlap.FULL:
-        add_overlap(condition=lambda r, c: True)
+        add_overlap(condition=lambda r, c: int(r) != r and int(c) != c)
+        add_overlap(condition=lambda r, c: (int(r) != r and int(c) == c) or (int(r) == r and int(c) != c))
 
     else:  # no overlap
         pass
@@ -80,7 +81,11 @@ def generate_permutations(seed, grid_shape, subinput_shape, overlap, scheme):
     n_repeats = subinput_shape[-1] \
         if scheme in [PermSchemas.NAIVE, PermSchemas.IDENTITY] \
         else 1
-    random_states = init_keys(seed, grid_shape, overlap, n_repeats)
+    random_states = init_keys(seed, grid_shape, Overlap.FULL, n_repeats)
+    if overlap == Overlap.CENTER:
+        random_states = {(row, col): keys for (row, col), keys in list(random_states.items())[:5]}
+    if overlap == Overlap.NONE:
+        random_states = {(row, col): keys for (row, col), keys in list(random_states.items())[:4]}
     permutations = {}
     for (row, col), keys in random_states.items():
         if seed is None:

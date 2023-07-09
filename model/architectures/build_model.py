@@ -7,7 +7,7 @@ from tensorflow.keras.regularizers import l2
 from tensorflow.keras import Input
 from tensorflow.keras import Model
 from tensorflow.keras.layers import (
-    Concatenate, LayerNormalization, Add, Dense, Average, Dropout, GlobalAveragePooling2D, Activation
+    Concatenate, LayerNormalization, Add, Dense, Average, Dropout, GlobalAveragePooling2D, Activation, BatchNormalization
 )
 
 from enums import Aggregation
@@ -25,7 +25,6 @@ def get_model(model_type, arch_dir, sub_input_shape, n_classes, m_id):
     _out = Dense(n_classes, activation='softmax')(x) if n_classes != 2 else Dense(1, activation='sigmoid')(x)
     model = Model(inputs=_in, outputs=_out, name=f'{name}_{m_id}')
     plot_model(arch_dir, model, name)
-    model.summary()
     return model
 
 
@@ -40,8 +39,8 @@ def network(_in, model_type, m_id, i_dir):
 
 
 def aggregate(models, n_classes, aggr):
-    n_out = models[0].shape[-1]
-    models = [LayerNormalization()(z) for z in models]
+    # n_out = models[0].shape[-1] // 2
+    models = [BatchNormalization()(z) for z in models]
     x = {
         Aggregation.STRIP_CONCAT: Concatenate,
         Aggregation.CONCAT: Concatenate,
@@ -49,9 +48,6 @@ def aggregate(models, n_classes, aggr):
         Aggregation.AVERAGE: Average,
     }[aggr]()(models)
     x = Dropout(0.5)(x)
-    # x = Dense(n_out, kernel_regularizer=l2(1e-4))(x)
-    # x = Activation("gelu")(x)
-    # x = Dropout(0.5)(x)
     x = Dense(n_classes, activation='softmax')(x) if n_classes > 2 else Dense(1, activation='sigmoid')(x)
     return x
 

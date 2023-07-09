@@ -11,9 +11,9 @@ class Aggregation(Enum):
 class Overlap(Enum):
     #       (scheme_name, apply_basic_grid)
     CENTER = ('center', True)
-    CROSS = ('cross', False)
-    EDGES = ('edges', False)
-    CORNERS = ('corners', False)
+    CROSS = ('cross', True)
+    EDGES = ('edges', True)
+    CORNERS = ('corners', True)
     FULL = ('full', True)
     NONE = ('none', True)
 

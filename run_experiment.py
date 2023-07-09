@@ -1,6 +1,9 @@
 import os
+import shutil
 
-# os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'  # suppress logging
+from enums import Overlap
+
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'  # suppress logging
 import pathlib
 import pickle
 from contextlib import redirect_stdout
@@ -22,7 +25,7 @@ print(device_lib.list_local_devices())
 
 N_REPEATS = 5
 N_SPLITS = 2
-kfold = RepeatedStratifiedKFold(n_splits=N_SPLITS, n_repeats=N_REPEATS)
+kfold = RepeatedStratifiedKFold(n_splits=N_SPLITS, n_repeats=N_REPEATS, random_state=42)
 
 ds = [
     'cifar10',
@@ -35,6 +38,23 @@ ds = [
 ]
 
 
+def reuse_trained_models(model_path, overlap):
+    full_path = model_path.replace('ov_' + overlap.name.lower(), 'ov_' + Overlap.FULL.name.lower())
+    if os.path.exists(full_path):
+        if overlap == Overlap.CENTER:
+            n_models = 5
+        elif overlap == Overlap.NONE:
+            n_models = 4
+        else:
+            return
+        for i in range(n_models):
+            sub_path = os.path.join(full_path, 'subs', str(i))
+            if os.path.exists(sub_path):
+                continue
+            print(f"Reusing model {sub_path}")
+            shutil.copytree(sub_path, os.path.join(model_path, 'subs', str(i)))
+
+
 def parse_config(model_params, ds_name, f_id, n_classes, input_shape, experiment_name):
     mode = model_params['type']
     grid_size = model_params['grid_size']
@@ -43,6 +63,7 @@ def parse_config(model_params, ds_name, f_id, n_classes, input_shape, experiment
     aggr_scheme = model_params['aggregation']
     scheme = model_params.get('permutation_scheme')
     arch = model_params.get('model_architecture')
+
     print(f'{input_shape=} {grid_size=}')
     sub_input_shape = (input_shape[0] // grid_size[0], input_shape[1] // grid_size[1], input_shape[2])
 
@@ -55,6 +76,7 @@ def parse_config(model_params, ds_name, f_id, n_classes, input_shape, experiment
                  f"ov_{overlap.name.lower()}-agg_{aggr_scheme.name.lower()}-{grid_size[0]}x{grid_size[1]}/fold_{f_id}"
 
     classes = get_classes_names_for_dataset(ds_name)
+    reuse_trained_models(model_path, overlap)
     print(
         f"Running with ({mode}, {arch.name.lower()}, {scheme.name.lower()}, {aggr_scheme.name.lower()},"
         f" {overlap.name.lower()})")
@@ -169,5 +191,5 @@ def print_pretty_table(t_statistic, p_value, advantage_table, save_path, headers
 
 
 if __name__ == '__main__':
-    run_tests(ds, experiment_name='overlap_5')
-    run_tests(ds, experiment_name='permutation_5')
+    e_id = 'exp-3'
+    run_tests(ds, experiment_name=f'{e_id}')

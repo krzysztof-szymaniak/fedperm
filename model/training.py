@@ -80,7 +80,7 @@ def train_model(x_train, y_train, x_val, y_val, model_path, permutations, sub_in
     models_outputs = [model(inpt) for model, inpt in zip(models, inputs)]
     outputs = aggregate(models_outputs, n_classes, aggr_scheme)
     aggregated_model = Model(inputs=inputs, outputs=outputs, name=mode)
-    aggregated_model.summary()
+    # aggregated_model.summary()
     plot_model(arch_info_dir, aggregated_model, mode)
     aggregated_model.compile(**compile_options(n_classes))
     name = f'{ds_name}-{arch.name.lower()}-{mode}'
@@ -107,7 +107,7 @@ def fit_model(model, data, dirs, name):
     print(f"Saving {model_path}...")
     model.save(model_path)
     save_training_info(model, training_info_dir)
-    print("Done ")
+    print("Model saved")
     return model
 
 
