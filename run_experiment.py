@@ -1,3 +1,4 @@
+import gc
 import os
 import shutil
 
@@ -11,7 +12,7 @@ from copy import copy
 from pprint import pprint
 
 import numpy as np
-from scipy.stats import ttest_rel
+from scipy.stats import ttest_rel, wilcoxon
 from sklearn.model_selection import RepeatedStratifiedKFold
 from tensorflow.python.client import device_lib
 from tabulate import tabulate
@@ -29,7 +30,7 @@ kfold = RepeatedStratifiedKFold(n_splits=N_SPLITS, n_repeats=N_REPEATS, random_s
 
 ds = [
     'cifar10',
-    'cifar100',
+    # 'cifar100',
     # 'fashion_mnist',
     # 'emnist-letters',
     # 'cats_vs_dogs',
@@ -39,8 +40,8 @@ ds = [
 
 
 def reuse_trained_models(model_path, overlap):
-    full_path = model_path.replace('ov_' + overlap.name.lower(), 'ov_' + Overlap.FULL.name.lower())
-    if os.path.exists(full_path):
+    source_path = model_path.replace('ov_' + overlap.name.lower(), 'ov_' + Overlap.FULL.name.lower())
+    if os.path.exists(source_path) and source_path != model_path:
         if overlap == Overlap.CENTER:
             n_models = 5
         elif overlap == Overlap.NONE:
@@ -48,11 +49,12 @@ def reuse_trained_models(model_path, overlap):
         else:
             return
         for i in range(n_models):
-            sub_path = os.path.join(full_path, 'subs', str(i))
-            if os.path.exists(sub_path):
+            sub_source_path = os.path.join(source_path, 'subs', str(i))
+            target_path = os.path.join(model_path, 'subs', str(i))
+            if os.path.exists(target_path):
                 continue
-            print(f"Reusing model {sub_path}")
-            shutil.copytree(sub_path, os.path.join(model_path, 'subs', str(i)))
+            print(f"Reusing model {sub_source_path}")
+            shutil.copytree(sub_source_path, target_path)
 
 
 def parse_config(model_params, ds_name, f_id, n_classes, input_shape, experiment_name):
@@ -111,11 +113,12 @@ def evaluate_models(data, models, scores_path, experiment_name, run_faulty_test=
                     print("Running test with invalid key")
                     invalid_test_config = copy(m_config)
                     invalid_test_config['seed'] = 1111
-                    predict(
+                    acc = predict(
                         model_path, x_test, y_test, params[2], classes_names,
                         invalid_test=invalid_test_config,
                         test_dir_name='test_invalid_perm'
                     )
+                    print("False Accuracy: ", acc)
                 acc = predict(model_path, x_test, y_test, params[2], classes_names)
                 print("Accuracy: ", acc)
                 scores[d_id, m_id, f_id] = acc
@@ -133,7 +136,7 @@ def run_tests(data, experiment_name=None):
     exp_dir = f'experiments/{experiment_name}'
     scores_path = f'{exp_dir}/scores'
     pathlib.Path(exp_dir).mkdir(exist_ok=True, parents=True)
-    models_params = get_experiment(experiment_name)
+    models_params = get_experiment()
     with open(f'{exp_dir}/experiment_config', 'w') as conf:
         pprint(models_params, conf)
 
@@ -152,7 +155,8 @@ def run_stats(scores, exp_dir, models, alfa=0.05):
     for model_params in models:
         overlap = model_params['overlap'].name.lower()
         scheme = model_params.get('permutation_scheme').name.lower()
-        headers.append(f'ConvMixer-{overlap}-{scheme}')
+        m_type = model_params['type'][:4]
+        headers.append(f'CM-{m_type}-{overlap}-{scheme}')
     pathlib.Path(exp_dir).mkdir(exist_ok=True)
     n_models = scores.shape[1]
     for d_id, ds_scores in enumerate(scores):
@@ -162,6 +166,8 @@ def run_stats(scores, exp_dir, models, alfa=0.05):
             for j in range(n_models):
                 if i != j:
                     t_statistic[i, j], p_value[i, j] = ttest_rel(ds_scores[i], ds_scores[j])
+                    # res = wilcoxon(ds_scores[i], ds_scores[j])
+                    # t_statistic[i, j], p_value[i, j] = res.statistic, res.pvalue
         advantage = np.zeros((n_models, n_models))
         advantage[t_statistic > 0] = 1
         significance = np.zeros((n_models, n_models))

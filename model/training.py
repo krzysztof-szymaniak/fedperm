@@ -35,17 +35,18 @@ def train_model(x_train, y_train, x_val, y_val, model_path, permutations, sub_in
                 mode, aggr_scheme=None, m_id=None):
     training_info_dir, examples_info_dir, arch_info_dir, checkpoints_dir = set_up_dirs(model_path)
     train_dirs = (model_path, checkpoints_dir, training_info_dir)
-    generators = get_train_valid_gens(
-        x_train, y_train, x_val, y_val,
-        permutations=permutations,
-        sub_input_shape=sub_input_shape,
-        examples_path=examples_info_dir
-    )
     save_permutation(model_path, permutations)
     if mode == 'single':
         model = get_model(arch, arch_info_dir, sub_input_shape, n_classes, m_id=m_id, )
         model.compile(**compile_options(n_classes))
         name = f'{ds_name}-{arch.name.lower()}-{mode}-{m_id}'
+        generators = get_train_valid_gens(
+            x_train, y_train, x_val, y_val,
+            permutations=permutations,
+            sub_input_shape=sub_input_shape,
+            examples_path=examples_info_dir,
+            save_examples=m_id is None,
+        )
         fit_model(model, generators, train_dirs, name)
         return model
 
@@ -84,6 +85,13 @@ def train_model(x_train, y_train, x_val, y_val, model_path, permutations, sub_in
     plot_model(arch_info_dir, aggregated_model, mode)
     aggregated_model.compile(**compile_options(n_classes))
     name = f'{ds_name}-{arch.name.lower()}-{mode}'
+    generators = get_train_valid_gens(
+        x_train, y_train, x_val, y_val,
+        permutations=permutations,
+        sub_input_shape=sub_input_shape,
+        examples_path=examples_info_dir,
+        save_examples=True,
+    )
     fit_model(aggregated_model, generators, train_dirs, name)
     return aggregated_model
 

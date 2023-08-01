@@ -6,6 +6,7 @@ class Aggregation(Enum):
     CONCAT = 'concat'
     ADD = 'add'
     AVERAGE = 'avg'
+    NONE = 'none'
 
 
 class Overlap(Enum):
