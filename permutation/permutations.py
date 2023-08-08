@@ -3,6 +3,7 @@ from os.path import join
 
 import cv2
 import imageio
+import matplotlib.pyplot as plt
 import numpy as np
 import tensorflow as tf
 from PIL import Image
@@ -98,6 +99,44 @@ def generate_permutations(seed, grid_shape, subinput_shape, overlap, scheme):
     return permutations
 
 
+def plot_hist(x, x_patch, x_enc, path, patch_id, enc_type):
+    images = [x, x_patch, x_enc]
+    fig, axs = plt.subplots(len(images), 4, figsize=[12, 12])
+    rgb = ['r', 'g', 'b']
+    patch_name = \
+        ('top left',
+         'top right',
+         'bottom left',
+         'bottom right'
+         )[patch_id] + ' patch' if patch_id < 4 else ''
+
+    ymax = 0
+    for i, x in enumerate(images):
+        axs[i, 0].imshow(x)
+        if i == 0:
+            title = 'whole image'
+        if i == 1:
+            title = patch_name
+        if i == 2:
+            enc = 'block-wise' if type(enc_type) == BlockScramble else 'full channel-wise'
+            title = patch_name + f' \n{enc}\nencryption'
+        axs[i, 0].set_title(title, fontsize=15)
+        for c in range(x.shape[-1]):
+            ax = axs[i, c + 1]
+            y, _, _ = ax.hist(x[:, :, c].flatten(), 255, color=rgb[c])
+            top_limit = y.max()
+            if top_limit > ymax:
+                ymax = top_limit
+    for i, x in enumerate(images):
+        for c in range(x.shape[-1]):
+            ax = axs[i, c + 1]
+            ax.set_ylim([None, ymax])
+            ax.set_xlim([None, 255])
+    plt.tight_layout()
+    fig.savefig(path)
+    plt.close('all')
+
+
 class PermutationGenerator(tf.keras.utils.Sequence):
     def __init__(self, X, Y, augmenter, subinput_shape, shuffle_dataset=True, batch_size=None, permutations=None,
                  examples_path=None):
@@ -111,10 +150,30 @@ class PermutationGenerator(tf.keras.utils.Sequence):
         self.permutations = permutations
         self.examples_path = examples_path
 
+    def run_histograms(self, xb):
+        max_imgs = len(xb)
+        sr, sc, channels = self.sub_input_shape
+        hist_path = join(self.examples_path, 'histograms')
+        for index, x in enumerate(xb[:max_imgs]):
+            x = cv2.normalize(x, None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_32F)
+            x = x.astype(np.uint8)
+            subimages = self.generate_frames(np.array([x]))
+            ind_path = join(hist_path, f'{index + 1}')
+            pathlib.Path(ind_path).mkdir(exist_ok=True, parents=True)
+            for i, ((row, col), subimg) in enumerate(zip(self.permutations, subimages)):
+                r_s = slice(int(row * sr), int((row + 1) * sr))
+                c_s = slice(int(col * sc), int((col + 1) * sc))
+                subimg = subimg[0, ...]
+                subimg = cv2.normalize(subimg, None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_32F)
+                subimg = subimg.astype(np.uint8)
+                plot_hist(x, x[r_s, c_s, :], subimg, join(ind_path, f'{i}.svg'), patch_id=i,
+                          enc_type=self.permutations[(row, col)][0])
+
     def generate_and_save_examples(self, borders=True):
         print("Generating examples...")
         scale = 15
         xb, yb = self.batch_gen.next()
+        self.run_histograms(xb)
         xb = self.augment(xb)
         max_imgs = len(xb)
         sr, sc, channels = self.sub_input_shape
@@ -138,8 +197,8 @@ class PermutationGenerator(tf.keras.utils.Sequence):
                     width = int(0.02 * x.shape[0])
                 if borders:
                     x = cv2.rectangle(
-                        x, (int(row * sr) * scale, int(col * sc) * scale),
-                        (int((row + 1) * sr * scale), int((col + 1) * sc) * scale),
+                        x, (int(col * sc) * scale, int(row * sr) * scale),
+                        (int((col + 1) * sc) * scale, int((row + 1) * sr * scale)),
                         color, width
                     )
                 subimg = subimg[0, ...]
@@ -151,8 +210,12 @@ class PermutationGenerator(tf.keras.utils.Sequence):
                 padded = pad_around(subimg, x.shape)
                 res = np.hstack((x, padded))
                 imgs.append(res)
-            gif_path = join(self.examples_path, f'frames-{index + 1}.gif')
-            imageio.mimsave(gif_path, imgs, fps=55, duration=0.5)
+            if len(imgs) > 1:
+                gif_path = join(self.examples_path, f'frames-{index + 1}.gif')
+                imageio.mimsave(gif_path, imgs, fps=55, duration=0.5)
+            else:
+                img_path = join(self.examples_path, f'frames-{index + 1}.svg')
+                plt.imsave(img_path, imgs[0], format='svg')
 
     def augment(self, x):
         return np.array(

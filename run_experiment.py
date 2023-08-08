@@ -12,7 +12,7 @@ from copy import copy
 from pprint import pprint
 
 import numpy as np
-from scipy.stats import ttest_rel, wilcoxon
+from scipy.stats import ttest_rel
 from sklearn.model_selection import RepeatedStratifiedKFold
 from tensorflow.python.client import device_lib
 from tabulate import tabulate
@@ -57,6 +57,22 @@ def reuse_trained_models(model_path, overlap):
             shutil.copytree(sub_source_path, target_path)
 
 
+def get_path_from_config(model_params, ds_name, f_id, experiment_name):
+    mode = model_params['type']
+    grid_size = model_params['grid_size']
+    seed = model_params['seed']
+    overlap = model_params['overlap']
+    aggr_scheme = model_params['aggregation']
+    scheme = model_params.get('permutation_scheme')
+    arch = model_params.get('model_architecture')
+    model_path = f"experiments/{experiment_name}/{ds_name}/{mode}/" \
+                 f"{arch.value}/" \
+                 f"{'perm-' if seed is not None else 'identity'}" \
+                 f"{scheme.name.lower() if scheme and seed else ''}/" \
+                 f"ov_{overlap.name.lower()}-agg_{aggr_scheme.name.lower()}-{grid_size[0]}x{grid_size[1]}/fold_{f_id}"
+    return model_path
+
+
 def parse_config(model_params, ds_name, f_id, n_classes, input_shape, experiment_name):
     mode = model_params['type']
     grid_size = model_params['grid_size']
@@ -71,11 +87,7 @@ def parse_config(model_params, ds_name, f_id, n_classes, input_shape, experiment
 
     permutations = generate_permutations(seed, grid_size, sub_input_shape, overlap, scheme)
 
-    model_path = f"experiments/{experiment_name}/{ds_name}/{mode}/" \
-                 f"{arch.value}/" \
-                 f"{'perm-' if seed is not None else 'identity'}" \
-                 f"{scheme.name.lower() if scheme and seed else ''}/" \
-                 f"ov_{overlap.name.lower()}-agg_{aggr_scheme.name.lower()}-{grid_size[0]}x{grid_size[1]}/fold_{f_id}"
+    model_path = get_path_from_config(model_params, ds_name, f_id, experiment_name)
 
     classes = get_classes_names_for_dataset(ds_name)
     reuse_trained_models(model_path, overlap)
@@ -119,7 +131,7 @@ def evaluate_models(data, models, scores_path, experiment_name, run_faulty_test=
                         test_dir_name='test_invalid_perm'
                     )
                     print("False Accuracy: ", acc)
-                acc = predict(model_path, x_test, y_test, params[2], classes_names)
+                acc = predict(model_path, x_test, y_test, params[2], classes_names, mode=params[6])
                 print("Accuracy: ", acc)
                 scores[d_id, m_id, f_id] = acc
                 configs[d_id][m_id][f_id] = m_config
@@ -150,30 +162,50 @@ def run_tests(data, experiment_name=None):
     run_stats(results['scores'], exp_dir, models_params)
 
 
-def run_stats(scores, exp_dir, models, alfa=0.05):
+def run_stats(scores, exp_dir, models_params, alfa=0.05):
     headers = []
-    for model_params in models:
-        overlap = model_params['overlap'].name.lower()
-        scheme = model_params.get('permutation_scheme').name.lower()
-        m_type = model_params['type'][:4]
+    for m_config in models_params:
+        overlap = m_config['overlap'].name.lower()
+        scheme = m_config.get('permutation_scheme').name.lower()
+        m_type = m_config['type'][:4]
         headers.append(f'CM-{m_type}-{overlap}-{scheme}')
+
     pathlib.Path(exp_dir).mkdir(exist_ok=True)
     n_models = scores.shape[1]
     for d_id, ds_scores in enumerate(scores):
+        ds_name = ds[d_id]
         t_statistic = np.zeros((n_models, n_models))
         p_value = np.zeros((n_models, n_models))
         for i in range(n_models):
             for j in range(n_models):
                 if i != j:
                     t_statistic[i, j], p_value[i, j] = ttest_rel(ds_scores[i], ds_scores[j])
-                    # res = wilcoxon(ds_scores[i], ds_scores[j])
-                    # t_statistic[i, j], p_value[i, j] = res.statistic, res.pvalue
+
         advantage = np.zeros((n_models, n_models))
         advantage[t_statistic > 0] = 1
         significance = np.zeros((n_models, n_models))
         significance[p_value <= alfa] = 1
         adv_table = significance * advantage
-        print_pretty_table(t_statistic, p_value, adv_table, save_path=f'{exp_dir}/{ds[d_id]}', headers=headers)
+        print_pretty_table(t_statistic, p_value, adv_table, save_path=f'{exp_dir}/{ds_name}', headers=headers)
+        print_some_more_stats(ds_scores, models_params)
+
+
+def print_some_more_stats(ds_scores, models_params, ds_name='cifar10', experiment_name='exp-3'):
+    n_folds = ds_scores.shape[1]
+    for m_id, m_config in enumerate(models_params):
+        scores = []
+        for f_id in range(n_folds):
+            model_path = get_path_from_config(m_config, ds_name, f_id, experiment_name)
+            scores_path = os.path.join(model_path, 'test', 'sub_preds.npy')
+            if os.path.exists(scores_path):
+                scores.append(np.load(scores_path))
+        print(model_path.rstrip(f'/fold_{n_folds - 1}').lstrip('experiments/exp-3/cifar10/'))
+        if scores:
+            print(f"avg subscores: {np.round(np.average(scores, axis=0), 4)}")
+            print(f"std subscores: {np.round(np.std(scores, axis=0), 4)}")
+        print(f'avg & std total score {np.average(ds_scores[m_id]):.4f} & {np.std(ds_scores[m_id]):.4f}')
+        print()
+        print()
 
 
 def print_pretty_table(t_statistic, p_value, advantage_table, save_path, headers):
@@ -182,7 +214,7 @@ def print_pretty_table(t_statistic, p_value, advantage_table, save_path, headers
     t_statistic_table = tabulate(t_statistic_table, headers, floatfmt=".2f")
 
     p_value_table = np.concatenate((names_column, p_value), axis=1)
-    p_value_table = tabulate(p_value_table, headers, floatfmt=".6f")
+    p_value_table = tabulate(p_value_table, headers, floatfmt=".8f")
 
     adv_table = np.concatenate((names_column, advantage_table), axis=1)
     adv_table = tabulate(adv_table, headers)
@@ -197,5 +229,5 @@ def print_pretty_table(t_statistic, p_value, advantage_table, save_path, headers
 
 
 if __name__ == '__main__':
-    e_id = 'exp-3'
+    e_id = 'exp'
     run_tests(ds, experiment_name=f'{e_id}')

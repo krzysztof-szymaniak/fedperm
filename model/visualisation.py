@@ -10,25 +10,27 @@ from tensorflow.keras.layers import Dense, Conv2D, SpatialDropout2D, Dropout, Ma
     GlobalAveragePooling2D, Add, Multiply, DepthwiseConv2D, Concatenate, Activation
 from tensorflow.keras import utils
 
-SAVE_VIZ = False
+SAVE_VIZ = True
+FORMAT = 'png'
 
 
 def plot_model(save_folder, model, filename):
     pathlib.Path(save_folder).mkdir(exist_ok=True, parents=True)
     if SAVE_VIZ:
         utils.plot_model(
-            model, show_layer_names=False, show_shapes=True, to_file=f'{save_folder}/{filename}_summary.png'
+            model, show_layer_names=False, show_shapes=True, to_file=f'{save_folder}/{filename}_summary.{FORMAT}'
         )
     with open(f'{save_folder}/{filename}.txt', 'w') as f:
         with redirect_stdout(f):
             model.summary()
     # model.summary()
-    # font = ImageFont.truetype("arial.ttf", 12)
+    font = ImageFont.truetype("arial.ttf", 12)
     if SAVE_VIZ:
         visualkeras.layered_view(
-            model, to_file=f'{save_folder}/{filename}.png',
+            model, to_file=f'{save_folder}/{filename}.{FORMAT}',
             legend=True,
-            color_map=get_color_map()
+            color_map=get_color_map(),
+            font=font
         )
 
 

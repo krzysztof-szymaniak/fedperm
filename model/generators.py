@@ -13,7 +13,7 @@ def get_train_valid_gens(x_train, y_train, x_val, y_val, permutations, sub_input
         sub_input_shape=sub_input_shape,
         augmented=True,
         examples_path=examples_path,
-        save_examples=save_examples,
+        save_examples=False,
         shuffle=True,
     )
     valid_ds = get_generator(
@@ -21,7 +21,7 @@ def get_train_valid_gens(x_train, y_train, x_val, y_val, permutations, sub_input
         batch_size=BATCH_SIZE,
         permutations=permutations,
         examples_path=examples_path,
-        save_examples=False,
+        save_examples=save_examples,
         sub_input_shape=sub_input_shape
     )
     return train_ds, valid_ds

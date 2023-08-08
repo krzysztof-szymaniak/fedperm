@@ -70,7 +70,7 @@ class SqueezeExcite(Layer):
         self.excite = Dense(filters, activation='sigmoid', use_bias=False)
 
     def plot_model(self, block_name, info_dir):
-        inputs = Input((16, 16, self.filters))
+        inputs = Input((8, 8, self.filters))
         _out = self.call(inputs)
         m = Model(inputs=inputs, outputs=_out, name=block_name)
         plot_model(f'{info_dir}/conv', m, block_name)

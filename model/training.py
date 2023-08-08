@@ -37,7 +37,7 @@ def train_model(x_train, y_train, x_val, y_val, model_path, permutations, sub_in
     train_dirs = (model_path, checkpoints_dir, training_info_dir)
     save_permutation(model_path, permutations)
     if mode == 'single':
-        model = get_model(arch, arch_info_dir, sub_input_shape, n_classes, m_id=m_id, )
+        model = get_model(arch, arch_info_dir, sub_input_shape, n_classes, m_id=m_id)
         model.compile(**compile_options(n_classes))
         name = f'{ds_name}-{arch.name.lower()}-{mode}-{m_id}'
         generators = get_train_valid_gens(
@@ -45,19 +45,12 @@ def train_model(x_train, y_train, x_val, y_val, model_path, permutations, sub_in
             permutations=permutations,
             sub_input_shape=sub_input_shape,
             examples_path=examples_info_dir,
-            save_examples=m_id is None,
+            save_examples=True,
         )
         fit_model(model, generators, train_dirs, name)
         return model
 
     models = []
-    if mode == 'parallel':
-        for i, _ in enumerate(permutations):
-            sub_model_path = join(model_path, "subs", str(i))
-            model = get_model(sub_model_path, arch_info_dir, sub_input_shape, n_classes, m_id=i, )
-            model = strip_last_layer(model)
-            models.append(model)
-
     if mode == 'composite':
         sub_model_paths = []
         for i, (coords, perm) in enumerate(permutations.items()):
@@ -96,22 +89,23 @@ def train_model(x_train, y_train, x_val, y_val, model_path, permutations, sub_in
     return aggregated_model
 
 
-def fit_model(model, data, dirs, name):
+def fit_model(model, data, dirs, name, skip=False):
     print("Training ", name)
     model_path, checkpoints_dir, training_info_dir = dirs
     train_ds, valid_ds = data
-    try:
-        model.fit(
-            train_ds, epochs=MAX_EPOCHS, verbose=1, validation_data=valid_ds,
-            steps_per_epoch=train_ds.n // BATCH_SIZE,
-            validation_steps=valid_ds.n // BATCH_SIZE,
-            callbacks=callbacks(checkpoints_dir, training_info_dir, name)
-        )
-    except KeyboardInterrupt:
-        print("\nInterrupted!")
-    best_weights = join(checkpoints_dir, 'weights.h5')
-    if exists(best_weights):
-        model.load_weights(best_weights)
+    if not skip:
+        try:
+            model.fit(
+                train_ds, epochs=MAX_EPOCHS, verbose=1, validation_data=valid_ds,
+                steps_per_epoch=train_ds.n // BATCH_SIZE,
+                validation_steps=valid_ds.n // BATCH_SIZE,
+                callbacks=callbacks(checkpoints_dir, training_info_dir, name)
+            )
+        except KeyboardInterrupt:
+            print("\nInterrupted!")
+        best_weights = join(checkpoints_dir, 'weights.h5')
+        if exists(best_weights):
+            model.load_weights(best_weights)
     print(f"Saving {model_path}...")
     model.save(model_path)
     save_training_info(model, training_info_dir)
@@ -121,10 +115,7 @@ def fit_model(model, data, dirs, name):
 
 def predict(model_path, x_test, y_test, sub_input_shape, classes_names, mode=None, test_dir_name=None,
             invalid_test=None):
-    print("Predicting ", model_path)
-    if test_dir_name is None:
-        test_dir_name = 'test'
-        permutations = load_permutation(model_path)
+    permutations = load_permutation(model_path)
     if type(invalid_test) == dict:
         permutations = generate_permutations(
             invalid_test['seed'],
@@ -133,14 +124,21 @@ def predict(model_path, x_test, y_test, sub_input_shape, classes_names, mode=Non
             invalid_test['overlap'],
             invalid_test['permutation_scheme']
         )
+    if test_dir_name is None:
+        test_dir_name = 'test'
+    testing_path = join(model_path, test_dir_name)
+
     if mode == 'composite':
+        sub_predictions = []
         for i, _ in enumerate(permutations):
             sub_model_path = join(model_path, "subs", str(i))
-            predict(sub_model_path, x_test, y_test, sub_input_shape, classes_names, mode='single',
-                    test_dir_name=test_dir_name, invalid_test=invalid_test)
+            acc = predict(sub_model_path, x_test, y_test, sub_input_shape, classes_names, mode='single',
+                          test_dir_name=test_dir_name, invalid_test=invalid_test)
+            sub_predictions.append(acc)
+        np.save(join(testing_path, 'sub_preds.npy'), sub_predictions)
 
+    print("Predicting ", model_path)
     model = load_model(model_path)
-    testing_path = join(model_path, test_dir_name)
     pathlib.Path(testing_path).mkdir(exist_ok=True, parents=True)
     test_gen = get_generator(x_test, y_test,
                              batch_size=len(x_test),
@@ -154,7 +152,7 @@ def predict(model_path, x_test, y_test, sub_input_shape, classes_names, mode=Non
     plt.ion()
     pp_matrix_from_data(actual_classes, predicted_classes, columns=classes_names,
                         figsize=[20, 20] if len(classes_names) > 10 else [8, 8])
-    plt.savefig(join(testing_path, 'conf_matrix.png'))
+    plt.savefig(join(testing_path, 'conf_matrix.svg'), format="svg")
     plt.close('all')
     plt.ioff()
     cr = classification_report(actual_classes, predicted_classes, target_names=classes_names)
