@@ -2,8 +2,6 @@ from model.train_configs import BATCH_SIZE
 from permutation.permutations import PermutationGenerator
 import albumentations as A
 
-GENERATE_EXAMPLES = False
-
 
 def get_train_valid_gens(x_train, y_train, x_val, y_val, permutations, sub_input_shape, examples_path, save_examples=False):
     train_ds = get_generator(

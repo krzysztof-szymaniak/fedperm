@@ -3,11 +3,10 @@ import pathlib
 import shutil
 from pprint import pprint
 
-from tensorflow.keras.regularizers import l2
 from tensorflow.keras import Input
 from tensorflow.keras import Model
 from tensorflow.keras.layers import (
-    Concatenate, LayerNormalization, Add, Dense, Average, Dropout, GlobalAveragePooling2D, Activation, BatchNormalization
+    Concatenate, Add, Dense, Average, Dropout, GlobalAveragePooling2D, BatchNormalization
 )
 
 from enums import Aggregation

@@ -157,7 +157,7 @@ class PermutationGenerator(tf.keras.utils.Sequence):
         for index, x in enumerate(xb[:max_imgs]):
             x = cv2.normalize(x, None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_32F)
             x = x.astype(np.uint8)
-            subimages = self.generate_frames(np.array([x]))
+            subimages = self.generate_patches(np.array([x]))
             ind_path = join(hist_path, f'{index + 1}')
             pathlib.Path(ind_path).mkdir(exist_ok=True, parents=True)
             for i, ((row, col), subimg) in enumerate(zip(self.permutations, subimages)):
@@ -178,7 +178,7 @@ class PermutationGenerator(tf.keras.utils.Sequence):
         max_imgs = len(xb)
         sr, sc, channels = self.sub_input_shape
         for index, x in enumerate(xb[:max_imgs]):
-            subimages = self.generate_frames(np.array([x]))
+            subimages = self.generate_patches(np.array([x]))
             x = cv2.normalize(x, None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_32F)
             x = x.astype(np.uint8)
             if channels == 1:
@@ -225,7 +225,7 @@ class PermutationGenerator(tf.keras.utils.Sequence):
     def next(self):
         x, y = self.batch_gen.next()
         x = self.augment(x)
-        xp = self.generate_frames(x)
+        xp = self.generate_patches(x)
         return xp, y
 
     def on_epoch_end(self):
@@ -237,7 +237,7 @@ class PermutationGenerator(tf.keras.utils.Sequence):
     def __len__(self):
         return self.n // self.batch_size
 
-    def generate_frames(self, x_batch):
+    def generate_patches(self, x_batch):
         sr, sc, _ = self.sub_input_shape
         x_frames = []
         for (row, col), perm in self.permutations.items():

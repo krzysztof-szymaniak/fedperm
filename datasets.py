@@ -1,7 +1,5 @@
 import string
 
-import cv2
-import matplotlib.pyplot as plt
 import numpy as np
 import tensorflow as tf
 import tensorflow_datasets as tfds
@@ -125,37 +123,3 @@ def get_classes_names_for_dataset(ds_name):
                    'telephone', 'television', 'tiger', 'tractor', 'train', 'trout', 'tulip', 'turtle', 'wardrobe',
                    'whale', 'willow_tree', 'wolf', 'woman', 'worm']
     return classes
-
-#
-# def main():
-#     datasets = [
-#         'cifar10',
-#         'cifar100',
-#         'fashion_mnist',
-#         'emnist-letters',
-#         # 'cats_vs_dogs',
-#         'mnist',
-#         # 'eurosat',
-#     ]
-#     for dataset in datasets:
-#         (x_train, y_train), (x_test, y_test), n_classes = load_data(dataset)
-#         classes = get_classes_names_for_dataset(dataset)
-#         print(f'{len(classes)=}')
-#
-#         rand_ids = np.random.choice(range(len(x_train)), 3 * 5)
-#         # fig, axs = plt.subplots(3, 5, figsize=[12, 12])
-#         #
-#         # for i, ax in enumerate(axs.flatten()):
-#         #     ind = rand_ids[i]
-#         #     if 'mnist' in dataset:
-#         #         ax.imshow(x_train[ind], cmap='gray')
-#         #     else:
-#         #         ax.imshow(x_train[ind])
-#         #     ax.set_title(classes[np.argmax(y_train[ind])], size=16)
-#         #     ax.axis('off')
-#         # fig.savefig(fr'C:\Users\Krzysztof\Desktop\teczka\Praca Magisterska\praca\źródła\zasoby\datasets\{dataset}.pdf')
-#         # plt.show()
-#
-#
-# if __name__ == '__main__':
-#     main()

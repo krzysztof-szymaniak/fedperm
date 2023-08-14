@@ -23,7 +23,7 @@ def plot_model(save_folder, model, filename):
     with open(f'{save_folder}/{filename}.txt', 'w') as f:
         with redirect_stdout(f):
             model.summary()
-    # model.summary()
+    model.summary()
     font = ImageFont.truetype("arial.ttf", 12)
     if SAVE_VIZ:
         visualkeras.layered_view(

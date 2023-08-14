@@ -24,6 +24,8 @@ from permutation.permutations import generate_permutations
 
 print(device_lib.list_local_devices())
 
+experiment_name = 'exp-3'
+
 N_REPEATS = 5
 N_SPLITS = 2
 kfold = RepeatedStratifiedKFold(n_splits=N_SPLITS, n_repeats=N_REPEATS, random_state=42)
@@ -57,7 +59,7 @@ def reuse_trained_models(model_path, overlap):
             shutil.copytree(sub_source_path, target_path)
 
 
-def get_path_from_config(model_params, ds_name, f_id, experiment_name):
+def get_path_from_config(model_params, ds_name, f_id):
     mode = model_params['type']
     grid_size = model_params['grid_size']
     seed = model_params['seed']
@@ -73,7 +75,7 @@ def get_path_from_config(model_params, ds_name, f_id, experiment_name):
     return model_path
 
 
-def parse_config(model_params, ds_name, f_id, n_classes, input_shape, experiment_name):
+def parse_config(model_params, ds_name, f_id, n_classes, input_shape):
     mode = model_params['type']
     grid_size = model_params['grid_size']
     seed = model_params['seed']
@@ -87,7 +89,7 @@ def parse_config(model_params, ds_name, f_id, n_classes, input_shape, experiment
 
     permutations = generate_permutations(seed, grid_size, sub_input_shape, overlap, scheme)
 
-    model_path = get_path_from_config(model_params, ds_name, f_id, experiment_name)
+    model_path = get_path_from_config(model_params, ds_name, f_id)
 
     classes = get_classes_names_for_dataset(ds_name)
     reuse_trained_models(model_path, overlap)
@@ -97,29 +99,27 @@ def parse_config(model_params, ds_name, f_id, n_classes, input_shape, experiment
     return (model_path, permutations, sub_input_shape, n_classes, ds_name, arch, mode, aggr_scheme), classes
 
 
-def train_models(data, models, experiment_name):
+def train_models(data, models):
     for d_id, ds_name in enumerate(data):
         (x, y), _, n_classes = load_data(ds_name)
         y_s = np.argmax(y, axis=1) if n_classes != 2 else y
         for m_id, m_config in enumerate(models):
             for f_id, (train, valid) in enumerate(kfold.split(x, y_s)):
-                params, _ = parse_config(m_config, ds_name, f_id, n_classes, x.shape[1:],
-                                         experiment_name=experiment_name)
+                params, _ = parse_config(m_config, ds_name, f_id, n_classes, x.shape[1:])
                 print(f'{m_id=} , {f_id=}')
                 model_path = params[0]
                 if not skip_training(model_path):
                     train_model(x[train], y[train], x[valid], y[valid], *params)
 
 
-def evaluate_models(data, models, scores_path, experiment_name, run_faulty_test=True):
+def evaluate_models(data, models, scores_path, run_faulty_test=True):
     configs = [[[None for _ in range(kfold.get_n_splits())] for _ in range(len(models))] for _ in range(len(data))]
     scores = np.zeros((len(data), len(models), kfold.get_n_splits()))
     for d_id, ds_name in enumerate(data):
         _, (x_test, y_test), n_classes = load_data(ds_name)
         for f_id in range(kfold.get_n_splits()):
             for m_id, m_config in enumerate(models):
-                params, classes_names = parse_config(m_config, ds_name, f_id, n_classes, x_test.shape[1:],
-                                                     experiment_name)
+                params, classes_names = parse_config(m_config, ds_name, f_id, n_classes, x_test.shape[1:])
                 model_path = params[0]
                 if run_faulty_test:
                     print("Running test with invalid key")
@@ -144,7 +144,7 @@ def evaluate_models(data, models, scores_path, experiment_name, run_faulty_test=
     return result
 
 
-def run_tests(data, experiment_name=None):
+def run_tests(data):
     exp_dir = f'experiments/{experiment_name}'
     scores_path = f'{exp_dir}/scores'
     pathlib.Path(exp_dir).mkdir(exist_ok=True, parents=True)
@@ -152,10 +152,10 @@ def run_tests(data, experiment_name=None):
     with open(f'{exp_dir}/experiment_config', 'w') as conf:
         pprint(models_params, conf)
 
-    train_models(data, models_params, experiment_name)
+    train_models(data, models_params)
 
     if not os.path.exists(scores_path):
-        results = evaluate_models(data, models_params, scores_path, experiment_name)
+        results = evaluate_models(data, models_params, scores_path)
     else:
         with open(scores_path, 'rb') as file:
             results = pickle.load(file)
@@ -190,16 +190,15 @@ def run_stats(scores, exp_dir, models_params, alfa=0.05):
         print_some_more_stats(ds_scores, models_params)
 
 
-def print_some_more_stats(ds_scores, models_params, ds_name='cifar10', experiment_name='exp-3'):
+def print_some_more_stats(ds_scores, models_params, ds_name='cifar10'):
     n_folds = ds_scores.shape[1]
     for m_id, m_config in enumerate(models_params):
         scores = []
         for f_id in range(n_folds):
-            model_path = get_path_from_config(m_config, ds_name, f_id, experiment_name)
+            model_path = get_path_from_config(m_config, ds_name, f_id)
             scores_path = os.path.join(model_path, 'test', 'sub_preds.npy')
             if os.path.exists(scores_path):
                 scores.append(np.load(scores_path))
-        print(model_path.rstrip(f'/fold_{n_folds - 1}').lstrip('experiments/exp-3/cifar10/'))
         if scores:
             print(f"avg subscores: {np.round(np.average(scores, axis=0), 4)}")
             print(f"std subscores: {np.round(np.std(scores, axis=0), 4)}")
@@ -229,5 +228,4 @@ def print_pretty_table(t_statistic, p_value, advantage_table, save_path, headers
 
 
 if __name__ == '__main__':
-    e_id = 'exp'
-    run_tests(ds, experiment_name=f'{e_id}')
+    run_tests(ds)
