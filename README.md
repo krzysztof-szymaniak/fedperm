@@ -1,5 +1,5 @@
 # distributed-ensemble-learning-with-permuted-images
-Federated learning with permutation obfuscation done as a part of master's thesis.
+Distributed learning with permutation obfuscation to enable private neural network training done as a part of master's thesis.
 
 ## Contribution
 The project aims to provide means of private neural network training. The idea consist in dividing image into pieces and permuting them with given scheme. 
